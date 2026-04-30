@@ -1,0 +1,344 @@
+<form version="1.1" theme="light">
+  <label>04 - Cookies HTTP Activity</label>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- BASE SEARCH                                                         -->
+  <!-- Scoped to http.log only. Files.log and the URI-time linkage panel  -->
+  <!-- use their own inline searches as they span different sources.      -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <search id="Base_Search">
+    <query>index=zeek source="*http.log" | fields *</query>
+    <earliest>$time_range.earliest$</earliest>
+    <latest>$time_range.latest$</latest>
+  </search>
+
+  <fieldset submitButton="true" autoRun="true">
+    <input type="time" token="time_range" searchWhenChanged="false">
+      <label>Time Range</label>
+      <default>
+        <earliest>-24h@h</earliest>
+        <latest>now</latest>
+      </default>
+    </input>
+    <input type="multiselect" token="src_ip_include" searchWhenChanged="false">
+      <label>Source IP - Include</label>
+      <choice value="*">All</choice>
+      <fieldForLabel>id.orig_h</fieldForLabel>
+      <fieldForValue>id.orig_h</fieldForValue>
+      <search base="Base_Search">
+        <query>| table id.orig_h | dedup id.orig_h | sort id.orig_h</query>
+      </search>
+      <default>*</default>
+      <initialValue>*</initialValue>
+      <valuePrefix>id.orig_h="</valuePrefix>
+      <valueSuffix>"</valueSuffix>
+      <delimiter> OR </delimiter>
+      <prefix>(</prefix>
+      <suffix>)</suffix>
+    </input>
+    <input type="multiselect" token="src_ip_exclude" searchWhenChanged="false">
+      <label>Source IP - Exclude</label>
+      <choice value="__none__">None</choice>
+      <fieldForLabel>id.orig_h</fieldForLabel>
+      <fieldForValue>id.orig_h</fieldForValue>
+      <search base="Base_Search">
+        <query>| table id.orig_h | dedup id.orig_h | sort id.orig_h</query>
+      </search>
+      <default>__none__</default>
+      <initialValue>__none__</initialValue>
+      <valuePrefix>id.orig_h!="</valuePrefix>
+      <valueSuffix>"</valueSuffix>
+      <delimiter> AND </delimiter>
+      <prefix>(</prefix>
+      <suffix>)</suffix>
+    </input>
+    <input type="dropdown" token="http_method" searchWhenChanged="false">
+      <label>HTTP Method</label>
+      <choice value="*">All</choice>
+      <fieldForLabel>method</fieldForLabel>
+      <fieldForValue>method</fieldForValue>
+      <search base="Base_Search">
+        <query>| table method | dedup method | sort method</query>
+      </search>
+      <default>*</default>
+      <initialValue>*</initialValue>
+    </input>
+  </fieldset>
+
+  <row>
+    <panel>
+      <title>MIME Type / Extension Mismatch (exe/octet-stream/swf)</title>
+      <single>
+        <search base="Base_Search">
+          <query>| search $src_ip_include$ $src_ip_exclude$
+| rex field=uri ".+\.(?&lt;resource_ext&gt;\w+)\??"
+| fillnull value="none" resource_ext
+| eval fuid = if(orig_fuids=="-", resp_fuids, orig_fuids)
+| eval mimetype = if(orig_mime_types=="-", resp_mime_types, orig_mime_types)
+| eval safe = if(like(mimetype, "%" . resource_ext . "%"), 1, 0)
+| search mimetype IN ("application/x-dosexec","application/x-shockwave-flash","application/octet-stream") safe=0
+| stats count</query>
+        </search>
+        <option name="colorMode">block</option>
+        <option name="drilldown">all</option>
+        <option name="rangeColors">["0x53a051","0xdc4e41"]</option>
+        <option name="rangeValues">[0]</option>
+        <option name="useColors">1</option>
+        <option name="refresh.display">progressbar</option>
+      </single>
+    </panel>
+    <panel>
+      <title>Executables (.exe/.dll)</title>
+      <single>
+        <search base="Base_Search">
+          <query>| search $src_ip_include$ $src_ip_exclude$
+| rex field=uri "/.+(?&lt;filetype&gt;\.\w+)\??"
+| search filetype IN (".exe",".dll") | stats count</query>
+        </search>
+        <option name="colorMode">block</option>
+        <option name="drilldown">all</option>
+        <option name="rangeColors">["0x53a051","0xdc4e41"]</option>
+        <option name="rangeValues">[0]</option>
+        <option name="useColors">1</option>
+        <option name="refresh.display">progressbar</option>
+      </single>
+    </panel>
+    <panel>
+      <title>Scripts (.bat/.ps1/.vbs/.hta)</title>
+      <single>
+        <search base="Base_Search">
+          <query>| search $src_ip_include$ $src_ip_exclude$
+| rex field=uri "/.+(?&lt;filetype&gt;\.\w+)\??"
+| search filetype IN (".bat",".ps1",".vbs",".hta",".cmd") | stats count</query>
+        </search>
+        <option name="colorMode">block</option>
+        <option name="drilldown">all</option>
+        <option name="rangeColors">["0x53a051","0xdc4e41"]</option>
+        <option name="rangeValues">[0]</option>
+        <option name="useColors">1</option>
+        <option name="refresh.display">progressbar</option>
+      </single>
+    </panel>
+    <panel>
+      <title>Archives (.zip/.rar/.7z)</title>
+      <single>
+        <search base="Base_Search">
+          <query>| search $src_ip_include$ $src_ip_exclude$
+| rex field=uri "/.+(?&lt;filetype&gt;\.\w+)\??"
+| search filetype IN (".zip",".rar",".7z",".gz",".tar") | stats count</query>
+        </search>
+        <option name="colorMode">block</option>
+        <option name="drilldown">all</option>
+        <option name="rangeColors">["0x53a051","0xf8be34"]</option>
+        <option name="rangeValues">[0]</option>
+        <option name="useColors">1</option>
+        <option name="refresh.display">progressbar</option>
+      </single>
+    </panel>
+    <panel>
+      <title>Documents (.doc/.pdf/.xls)</title>
+      <single>
+        <search base="Base_Search">
+          <query>| search $src_ip_include$ $src_ip_exclude$
+| rex field=uri "/.+(?&lt;filetype&gt;\.\w+)\??"
+| search filetype IN (".doc",".docx",".xls",".xlsx",".rtf",".pdf") | stats count</query>
+        </search>
+        <option name="colorMode">block</option>
+        <option name="drilldown">all</option>
+        <option name="rangeColors">["0x53a051","0xf8be34"]</option>
+        <option name="rangeValues">[0]</option>
+        <option name="useColors">1</option>
+        <option name="refresh.display">progressbar</option>
+      </single>
+    </panel>
+    <panel>
+      <title>.php POST (C2/Beaconing)</title>
+      <single>
+        <search base="Base_Search">
+          <query>| search $src_ip_include$ $src_ip_exclude$
+| rex field=uri "/.+(?&lt;filetype&gt;\.\w+)\??"
+| search filetype=".php" method="POST" | stats count</query>
+        </search>
+        <option name="colorMode">block</option>
+        <option name="drilldown">all</option>
+        <option name="rangeColors">["0x53a051","0xf8be34"]</option>
+        <option name="rangeValues">[0]</option>
+        <option name="useColors">1</option>
+        <option name="refresh.display">progressbar</option>
+      </single>
+    </panel>
+    <panel>
+      <title>JAR Files</title>
+      <single>
+        <search base="Base_Search">
+          <query>| search $src_ip_include$ $src_ip_exclude$
+| rex field=uri "/.+(?&lt;filetype&gt;\.\w+)\??"
+| search filetype=".jar" | stats count</query>
+        </search>
+        <option name="colorMode">block</option>
+        <option name="drilldown">all</option>
+        <option name="rangeColors">["0x53a051","0xdc4e41"]</option>
+        <option name="rangeValues">[0]</option>
+        <option name="useColors">1</option>
+        <option name="refresh.display">progressbar</option>
+      </single>
+    </panel>
+  </row>
+
+  <row>
+    <panel>
+      <title>HTTP Log Detail</title>
+      <table>
+        <search base="Base_Search">
+          <query>| search $src_ip_include$ $src_ip_exclude$ method=$http_method$
+| rex field=uri "/.+(?&lt;filetype&gt;\.\w+)\??"
+| fillnull value="-" filetype
+| eval fuid = if(orig_fuids=="-", resp_fuids, orig_fuids)
+| table _time, uid, fuid, id.orig_h, id.resp_h, id.resp_p, host, uri, method,
+        status_code, filetype, user_agent, referrer, request_body_len, response_body_len
+| dedup uri
+| sort - _time</query>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*"+uid%3D"$row.uid|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+
+  <row>
+    <panel>
+      <title>HTTP Information by Bytes</title>
+      <table>
+        <search base="Base_Search">
+          <query>| search $src_ip_include$ $src_ip_exclude$
+| stats count by uid, id.orig_h, id.resp_h, id.resp_p, host, uri, method, response_body_len
+| dedup uri
+| sort - response_body_len</query>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*"+uid%3D"$row.uid|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+
+  <row>
+    <panel>
+      <title>Rare User-Agents</title>
+      <table>
+        <search base="Base_Search">
+          <query>| search $src_ip_include$ $src_ip_exclude$
+| stats count, dc(id.orig_h) as unique_clients, values(id.orig_h) as clients by user_agent
+| where count &lt; 5 AND user_agent!="" AND isnotnull(user_agent)
+| sort count</query>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*http.log"+user_agent%3D"$row.user_agent|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+    <panel>
+      <title>HTTP POST Requests (data exfil / C2)</title>
+      <table>
+        <search base="Base_Search">
+          <query>| search $src_ip_include$ $src_ip_exclude$ method="POST"
+| stats count, sum(request_body_len) as total_bytes_sent
+    by id.orig_h, id.resp_h, host, uri
+| sort - total_bytes_sent</query>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*http.log"+id.orig_h%3D"$row.id.orig_h|u$"+method%3DPOST</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+
+  <!-- files.log and the URI linkage panel use their own searches         -->
+  <!-- as they query different sources and cannot share the http.log base -->
+  <row>
+    <panel>
+      <title>Files.log - Real File Transfers (non-text mime types)</title>
+      <table>
+        <search>
+          <query>index=zeek source="*files.log"
+| where isnotnull(mime_type)
+      AND mime_type!=""
+      AND mime_type!="text/plain"
+      AND mime_type!="text/html"
+      AND isnotnull(fuid)
+      AND fuid!=""
+| eval size_kb = round(seen_bytes/1024, 2)
+| stats count by fuid, uid, id.orig_h, id.resp_h, id.resp_p,
+        source, mime_type, filename, size_kb
+| sort - size_kb</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*"+uid%3D"$row.uid|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+
+  <row>
+    <panel>
+      <table>
+        <title>Linking HTTP URI Times</title>
+        <search>
+          <query>index=zeek (sourcetype=zeek:http OR sourcetype=zeek:conn) id.resp_p!=5985
+| rename id.orig_h as src_ip, id.resp_h as dst_ip, id.resp_p as dst_port
+| stats
+    min(_time) as first_seen,
+    max(_time) as last_seen,
+    min(community_id) as first_id,
+    max(community_id) as last_id,
+    sum(resp_bytes) as bytes
+    values(uri) as uri
+    values(uid) as uid
+    by src_ip, dst_ip, dst_port
+| eval first_seen = strftime(first_seen, "%Y-%m-%d %H:%M:%S")
+| eval last_seen  = strftime(last_seen,  "%Y-%m-%d %H:%M:%S")
+| rex field=first_id \n:(?&lt;first_id&gt;.*)
+| rex field=last_id  \n:(?&lt;last_id&gt;.*)
+| where match(uri, "exe|com|scr|pif|bat|cmd|ps1|psm1|psd1|vbs|vbe|wsf|wsh|js|jse|sh|bash|doc|xls|ppt|docm|xlsm|pptm")
+| eval is_bad_ip = if(src_ip IN ("$$ext_bad_ips$$") or dst_ip IN ("$$ext_bad_ips$$") or src_ip IN ("$$int_bad_ips$$") or dst_ip IN ("$$int_bad_ips$$"), 1, 0)
+| sort -is_bad_ip -bytes
+| table first_seen, last_seen, src_ip, dst_ip, dst_port, bytes, uid, uri, first_id, last_id</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+          <sampleRatio>1</sampleRatio>
+        </search>
+        <option name="count">20</option>
+        <option name="dataOverlayMode">none</option>
+        <option name="drilldown">none</option>
+        <option name="percentagesRow">false</option>
+        <option name="rowNumbers">false</option>
+        <option name="totalsRow">false</option>
+        <option name="wrap">true</option>
+      </table>
+    </panel>
+  </row>
+
+</form>

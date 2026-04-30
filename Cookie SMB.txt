@@ -1,0 +1,406 @@
+<form version="1.1" theme="light">
+  <label>02 - Cookies SMB Activity</label>
+  <fieldset submitButton="true" autoRun="true">
+    <input type="time" token="time_range" searchWhenChanged="false">
+      <label>Time Range</label>
+      <default>
+        <earliest>-24h@h</earliest>
+        <latest>now</latest>
+      </default>
+    </input>
+    <input type="multiselect" token="src_ip_include" searchWhenChanged="false">
+      <label>Source IP - Include</label>
+      <choice value="*">All</choice>
+      <fieldForLabel>id.orig_h</fieldForLabel>
+      <fieldForValue>id.orig_h</fieldForValue>
+      <search>
+        <query>index=zeek source="*conn.log" | table id.orig_h | dedup id.orig_h | sort id.orig_h</query>
+        <earliest>$time_range.earliest$</earliest>
+        <latest>$time_range.latest$</latest>
+      </search>
+      <default>*</default>
+      <initialValue>*</initialValue>
+      <valuePrefix>id.orig_h="</valuePrefix>
+      <valueSuffix>"</valueSuffix>
+      <delimiter> OR </delimiter>
+      <prefix>(</prefix>
+      <suffix>)</suffix>
+    </input>
+    <input type="multiselect" token="src_ip_exclude" searchWhenChanged="false">
+      <label>Source IP - Exclude</label>
+      <choice value="__none__">None</choice>
+      <fieldForLabel>id.orig_h</fieldForLabel>
+      <fieldForValue>id.orig_h</fieldForValue>
+      <search>
+        <query>index=zeek source="*conn.log" | table id.orig_h | dedup id.orig_h | sort id.orig_h</query>
+        <earliest>$time_range.earliest$</earliest>
+        <latest>$time_range.latest$</latest>
+      </search>
+      <default>__none__</default>
+      <initialValue>__none__</initialValue>
+      <valuePrefix>id.orig_h!="</valuePrefix>
+      <valueSuffix>"</valueSuffix>
+      <delimiter> AND </delimiter>
+      <prefix>(</prefix>
+      <suffix>)</suffix>
+    </input>
+    <input type="multiselect" token="smb_name_include" searchWhenChanged="false">
+      <label>SMB Filename - Include</label>
+      <choice value="*">All</choice>
+      <fieldForLabel>name</fieldForLabel>
+      <fieldForValue>name</fieldForValue>
+      <search>
+        <query>index=zeek source="*smb_files.log" | table name | dedup name | sort name</query>
+        <earliest>$time_range.earliest$</earliest>
+        <latest>$time_range.latest$</latest>
+      </search>
+      <default>*</default>
+      <initialValue>*</initialValue>
+      <valuePrefix>name="</valuePrefix>
+      <valueSuffix>"</valueSuffix>
+      <delimiter> OR </delimiter>
+      <prefix>(</prefix>
+      <suffix>)</suffix>
+    </input>
+    <input type="multiselect" token="smb_name_exclude" searchWhenChanged="false">
+      <label>SMB Filename - Exclude</label>
+      <choice value="__none__">None</choice>
+      <fieldForLabel>name</fieldForLabel>
+      <fieldForValue>name</fieldForValue>
+      <search>
+        <query>index=zeek source="*smb_files.log" | table name | dedup name | sort name</query>
+        <earliest>$time_range.earliest$</earliest>
+        <latest>$time_range.latest$</latest>
+      </search>
+      <default>__none__</default>
+      <initialValue>__none__</initialValue>
+      <valuePrefix>name!="</valuePrefix>
+      <valueSuffix>"</valueSuffix>
+      <delimiter> AND </delimiter>
+      <prefix>(</prefix>
+      <suffix>)</suffix>
+    </input>
+    <input type="multiselect" token="smb_path_include" searchWhenChanged="false">
+      <label>SMB Path - Include</label>
+      <choice value="*">All</choice>
+      <fieldForLabel>path</fieldForLabel>
+      <fieldForValue>path</fieldForValue>
+      <search>
+        <query>index=zeek source="*smb_files.log" OR source="*smb_mapping.log" | table path | dedup path | sort path</query>
+        <earliest>$time_range.earliest$</earliest>
+        <latest>$time_range.latest$</latest>
+      </search>
+      <default>*</default>
+      <initialValue>*</initialValue>
+      <valuePrefix>path="</valuePrefix>
+      <valueSuffix>"</valueSuffix>
+      <delimiter> OR </delimiter>
+      <prefix>(</prefix>
+      <suffix>)</suffix>
+    </input>
+    <input type="multiselect" token="smb_path_exclude" searchWhenChanged="false">
+      <label>SMB Path - Exclude</label>
+      <choice value="__none__">None</choice>
+      <fieldForLabel>path</fieldForLabel>
+      <fieldForValue>path</fieldForValue>
+      <search>
+        <query>index=zeek source="*smb_files.log" OR source="*smb_mapping.log" | table path | dedup path | sort path</query>
+        <earliest>$time_range.earliest$</earliest>
+        <latest>$time_range.latest$</latest>
+      </search>
+      <default>__none__</default>
+      <initialValue>__none__</initialValue>
+      <valuePrefix>path!="</valuePrefix>
+      <valueSuffix>"</valueSuffix>
+      <delimiter> AND </delimiter>
+      <prefix>(</prefix>
+      <suffix>)</suffix>
+    </input>
+  </fieldset>
+  <row>
+    <panel>
+      <title>SMB File Activity - All Operations (smb_files.log)</title>
+      <table>
+        <search>
+          <query>index=zeek source="*smb_files.log" $src_ip_include$ $src_ip_exclude$
+| search $smb_name_include$ $smb_name_exclude$ $smb_path_include$ $smb_path_exclude$
+| eval size_kb = round(size/1024, 2)
+| stats count by id.orig_h, id.resp_h, action, name, path, size_kb, times.modified, fuid, uid
+| sort - count</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*"+uid%3D"$row.uid|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>SMB File Writes - Staging / Exfil Indicator</title>
+      <table>
+        <search>
+          <query>index=zeek source="*smb_files.log" $src_ip_include$ $src_ip_exclude$
+| search action="SMB::FILE_WRITE" OR action="SMB::FILE_OPEN"
+| search $smb_name_include$ $smb_name_exclude$ $smb_path_include$ $smb_path_exclude$
+| eval size_kb = round(size/1024, 2)
+| stats count by id.orig_h, id.resp_h, action, name, path, size_kb, fuid, uid
+| sort - size_kb</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*"+uid%3D"$row.uid|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+    <panel>
+      <title>SMB File Deletes / Renames - Ransomware / Anti-Forensics</title>
+      <table>
+        <search>
+          <query>index=zeek source="*smb_files.log" $src_ip_include$ $src_ip_exclude$
+| search action="SMB::FILE_DELETE" OR action="SMB::FILE_RENAME"
+| search $smb_name_include$ $smb_name_exclude$ $smb_path_include$ $smb_path_exclude$
+| stats count by id.orig_h, id.resp_h, action, name, prev_name, path, fuid, uid
+| sort - count</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*"+uid%3D"$row.uid|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>SMB Share Mappings - All (smb_mapping.log)</title>
+      <table>
+        <search>
+          <query>index=zeek source="*smb_mapping.log" $src_ip_include$ $src_ip_exclude$
+| search $smb_path_include$ $smb_path_exclude$
+| stats count by id.orig_h, id.resp_h, path, share_type, native_file_system, uid
+| sort - count</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*smb_mapping.log"+id.orig_h%3D"$row.id.orig_h|u$"+id.resp_h%3D"$row.id.resp_h|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+    <panel>
+      <!-- ═══════════════════════════════════════════════════════════════ -->
+      <!-- FIX: The original query used | search path="*ADMIN$*" etc.    -->
+      <!-- Splunk treats $ as a token delimiter in search strings, so     -->
+      <!-- ADMIN$, C$, IPC$ were silently consumed as empty tokens and   -->
+      <!-- the filter matched nothing. Fixed by moving share detection    -->
+      <!-- into a | where clause using match() with regex, which is       -->
+      <!-- evaluated after tokenisation and is immune to this issue.      -->
+      <!-- ═══════════════════════════════════════════════════════════════ -->
+      <title>SMB Admin Share Access (C$, ADMIN$, IPC$, SYSVOL, NETLOGON)</title>
+      <table>
+        <search>
+          <query>index=zeek source="*smb_mapping.log" $src_ip_include$ $src_ip_exclude$
+| where match(path, "(?i)(ADMIN\$|C\$|IPC\$|SYSVOL|NETLOGON)")
+| stats count by id.orig_h, id.resp_h, path, share_type, uid
+| sort - count</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*smb*"+id.orig_h%3D"$row.id.orig_h|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>SMB Commands - Top by Count (smb_cmd.log)</title>
+      <table>
+        <search>
+          <query>index=zeek source="*smb_cmd.log" $src_ip_include$ $src_ip_exclude$
+| stats count by id.orig_h, id.resp_h, command, sub_command, argument, status, uid
+| sort - count</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*smb_cmd.log"+id.orig_h%3D"$row.id.orig_h|u$"+command%3D"$row.command|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+    <panel>
+      <title>SMB Rare / Suspicious Commands</title>
+      <table>
+        <search>
+          <query>index=zeek source="*smb_cmd.log" $src_ip_include$ $src_ip_exclude$
+| rare limit=20 command by id.orig_h, id.resp_h
+| sort - count</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*smb_cmd.log"+id.orig_h%3D"$row.id.orig_h|u$"+command%3D"$row.command|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>SMB Auth Failures / Access Denied</title>
+      <table>
+        <search>
+          <query>index=zeek source="*smb_cmd.log" $src_ip_include$ $src_ip_exclude$
+| search status!="SUCCESS" AND status!=""
+| stats count by id.orig_h, id.resp_h, command, status, uid
+| sort - count</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*smb*"+id.orig_h%3D"$row.id.orig_h|u$"+id.resp_h%3D"$row.id.resp_h|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+    <panel>
+      <title>SMB Brute Force Candidates (&gt;5 errors per src)</title>
+      <table>
+        <search>
+          <query>index=zeek source="*smb_cmd.log" $src_ip_include$ $src_ip_exclude$
+| search status!="SUCCESS" AND status!=""
+| stats count AS error_count by id.orig_h, id.resp_h
+| where error_count &gt; 5
+| sort - error_count</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*smb*"+id.orig_h%3D"$row.id.orig_h|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>SMB Executable / Script File Transfers - Lateral Movement Indicator</title>
+      <table>
+        <search>
+          <query>index=zeek source="*smb_files.log" $src_ip_include$ $src_ip_exclude$
+| search $smb_name_include$ $smb_name_exclude$ $smb_path_include$ $smb_path_exclude$
+| where match(name, "(?i)\.(exe|dll|bat|ps1|vbs|js|msi|scr|hta|cmd)$")
+| eval size_kb = round(size/1024, 2)
+| stats count by id.orig_h, id.resp_h, action, name, path, size_kb, fuid, uid
+| sort - count</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+(source%3D"*smb_files.log"+OR+source%3D"*files.log")+fuid%3D"$row.fuid|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>NTLM Authentication (ntlm.log)</title>
+      <table>
+        <search>
+          <query>index=zeek source="*ntlm.log" $src_ip_include$ $src_ip_exclude$
+| stats count by id.orig_h, id.resp_h, username, hostname, domainname, success, uid
+| sort - count</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*ntlm.log"+uid%3D"$row.uid|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+    <panel>
+      <title>SMB Source-to-Target Activity Summary</title>
+      <table>
+        <search>
+          <query>index=zeek source="*smb_files.log" OR source="*smb_mapping.log" OR source="*smb_cmd.log" $src_ip_include$ $src_ip_exclude$
+| stats count AS total_events, dc(uid) AS sessions, values(source) AS log_sources by id.orig_h, id.resp_h
+| sort - total_events</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+(source%3D"*smb_files.log"+OR+source%3D"*smb_mapping.log"+OR+source%3D"*smb_cmd.log")+id.orig_h%3D"$row.id.orig_h|u$"+id.resp_h%3D"$row.id.resp_h|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <table>
+        <search>
+          <query>index=zeek source="*smb*" $src_ip_include$ $src_ip_exclude$
+| search $smb_name_include$ $smb_name_exclude$ $smb_path_include$ $smb_path_exclude$ | table name path share_type id.orig_h</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+          <sampleRatio>1</sampleRatio>
+        </search>
+        <option name="count">20</option>
+        <option name="dataOverlayMode">none</option>
+        <option name="drilldown">cell</option>
+        <option name="percentagesRow">false</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="rowNumbers">false</option>
+        <option name="totalsRow">false</option>
+        <option name="wrap">true</option>
+      </table>
+    </panel>
+  </row>
+</form>

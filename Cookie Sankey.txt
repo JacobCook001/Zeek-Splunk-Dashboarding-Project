@@ -1,0 +1,324 @@
+<form version="1.1" theme="light">
+  <label>Jacobs Dashboards — Sankey Flow Analysis</label>
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- BASE SEARCH                                                         -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <search id="Base_Search">
+    <query>index=zeek | fields *</query>
+    <earliest>$time_range.earliest$</earliest>
+    <latest>$time_range.latest$</latest>
+  </search>
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- ROW 1: Sankey — Src IP → Dst IP → Dst Port (conn.log)             -->
+  <!-- ─────────────────────────────────────────────────────────────────── -->
+  <!-- Leg 1: id.orig_h → id.resp_h  (who is talking to whom)            -->
+  <!-- Leg 2: id.resp_h → id.resp_p  (what port that dst is reached on)  -->
+  <!-- dst_ip_include / dst_ip_exclude applied to both legs.              -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- ROW 2: Sankey — Dst IP → URI  (http.log)                          -->
+  <!--         Sankey — fuid → uid   (files.log, non-text)               -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- ROW 3: Sankey — Src IP → Named Pipe → Operation  (dce_rpc.log)    -->
+  <!-- ─────────────────────────────────────────────────────────────────── -->
+  <!-- Two-leg flow: originator → named_pipe → operation.                 -->
+  <!-- High-value for detecting lateral movement over MSRPC:              -->
+  <!--   - svcctl (remote service creation/start)                         -->
+  <!--   - atsvc / ITaskSchedulerService (remote scheduled tasks)         -->
+  <!--   - samr / lsarpc (credential enumeration)                         -->
+  <!--   - winreg (remote registry manipulation)                          -->
+  <!--   - drsuapi (DCSync — DCSYNC attack)                               -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <fieldset submitButton="true" autoRun="true">
+    <input type="time" token="time_range" searchWhenChanged="false">
+      <label>Time Range</label>
+      <default>
+        <earliest>-24h@h</earliest>
+        <latest>now</latest>
+      </default>
+    </input>
+    <input type="multiselect" token="dst_ip_include" searchWhenChanged="false">
+      <label>Destination IP — Include</label>
+      <choice value="*">All</choice>
+      <fieldForLabel>id.resp_h</fieldForLabel>
+      <fieldForValue>id.resp_h</fieldForValue>
+      <search base="Base_Search">
+        <query>| search source="*conn.log"
+| table id.resp_h
+| dedup id.resp_h
+| sort id.resp_h</query>
+      </search>
+      <default>*</default>
+      <initialValue>*</initialValue>
+      <valuePrefix>id.resp_h="</valuePrefix>
+      <valueSuffix>"</valueSuffix>
+      <delimiter> OR </delimiter>
+      <prefix>(</prefix>
+      <suffix>)</suffix>
+    </input>
+    <input type="multiselect" token="dst_ip_exclude" searchWhenChanged="false">
+      <label>Destination IP — Exclude</label>
+      <choice value="__none__">None</choice>
+      <fieldForLabel>id.resp_h</fieldForLabel>
+      <fieldForValue>id.resp_h</fieldForValue>
+      <search base="Base_Search">
+        <query>| search source="*conn.log"
+| table id.resp_h
+| dedup id.resp_h
+| sort id.resp_h</query>
+      </search>
+      <default>__none__</default>
+      <initialValue>__none__</initialValue>
+      <valuePrefix>id.resp_h!="</valuePrefix>
+      <valueSuffix>"</valueSuffix>
+      <delimiter> AND </delimiter>
+      <prefix>(</prefix>
+      <suffix>)</suffix>
+    </input>
+    <input type="multiselect" token="src_ip_include" searchWhenChanged="false">
+      <label>Source IP — Include</label>
+      <choice value="*">All</choice>
+      <fieldForLabel>id.orig_h</fieldForLabel>
+      <fieldForValue>id.orig_h</fieldForValue>
+      <search base="Base_Search">
+        <query>| table id.orig_h
+| dedup id.orig_h
+| sort id.orig_h</query>
+      </search>
+      <default>*</default>
+      <initialValue>*</initialValue>
+      <valuePrefix>id.orig_h="</valuePrefix>
+      <valueSuffix>"</valueSuffix>
+      <delimiter> OR </delimiter>
+      <prefix>(</prefix>
+      <suffix>)</suffix>
+    </input>
+    <input type="multiselect" token="src_ip_exclude" searchWhenChanged="false">
+      <label>Source IP — Exclude</label>
+      <choice value="__none__">None</choice>
+      <fieldForLabel>id.orig_h</fieldForLabel>
+      <fieldForValue>id.orig_h</fieldForValue>
+      <search base="Base_Search">
+        <query>| table id.orig_h
+| dedup id.orig_h
+| sort id.orig_h</query>
+      </search>
+      <default>__none__</default>
+      <initialValue>__none__</initialValue>
+      <valuePrefix>id.orig_h!="</valuePrefix>
+      <valueSuffix>"</valueSuffix>
+      <delimiter> AND </delimiter>
+      <prefix>(</prefix>
+      <suffix>)</suffix>
+    </input>
+    <input type="multiselect" token="dst_port_include" searchWhenChanged="false">
+      <label>Destination Port — Include</label>
+      <choice value="*">All</choice>
+      <fieldForLabel>id.resp_p</fieldForLabel>
+      <fieldForValue>id.resp_p</fieldForValue>
+      <search base="Base_Search">
+        <query>| table id.resp_p
+| dedup id.resp_p
+| sort id.resp_p</query>
+      </search>
+      <default>*</default>
+      <initialValue>*</initialValue>
+      <valuePrefix>id.resp_p="</valuePrefix>
+      <valueSuffix>"</valueSuffix>
+      <delimiter> OR </delimiter>
+      <prefix>(</prefix>
+      <suffix>)</suffix>
+    </input>
+    <input type="multiselect" token="dst_port_exclude" searchWhenChanged="false">
+      <label>Destination Port — Exclude</label>
+      <choice value="__none__">None</choice>
+      <fieldForLabel>id.resp_p</fieldForLabel>
+      <fieldForValue>id.resp_p</fieldForValue>
+      <search base="Base_Search">
+        <query>| table id.resp_p
+| dedup id.resp_p
+| sort id.resp_p</query>
+      </search>
+      <default>__none__</default>
+      <initialValue>__none__</initialValue>
+      <valuePrefix>id.resp_p!="</valuePrefix>
+      <valueSuffix>"</valueSuffix>
+      <delimiter> AND </delimiter>
+      <prefix>(</prefix>
+      <suffix>)</suffix>
+    </input>
+    <input type="multiselect" token="noise_port_suppress" searchWhenChanged="false">
+      <label>Noise Filter — Suppress Ports from Sankey</label>
+      <choice value="__none__">None (show all)</choice>
+      <choice value="53">53 — DNS</choice>
+      <choice value="123">123 — NTP</choice>
+      <choice value="88">88 — Kerberos</choice>
+      <choice value="135">135 — RPC Endpoint Mapper</choice>
+      <choice value="137">137 — NetBIOS Name Service</choice>
+      <choice value="138">138 — NetBIOS Datagram</choice>
+      <choice value="139">139 — NetBIOS Session</choice>
+      <choice value="389">389 — LDAP</choice>
+      <choice value="445">445 — SMB</choice>
+      <choice value="636">636 — LDAPS</choice>
+      <choice value="5353">5353 — mDNS</choice>
+      <choice value="5355">5355 — LLMNR</choice>
+      <default>__none__</default>
+      <initialValue>__none__</initialValue>
+      <valuePrefix>id.resp_p!="</valuePrefix>
+      <valueSuffix>"</valueSuffix>
+      <delimiter> AND </delimiter>
+      <prefix>(</prefix>
+      <suffix>)</suffix>
+    </input>
+  </fieldset>
+  <row>
+    <panel>
+      <viz type="sankey_diagram_app.sankey_diagram">
+        <title>Src IP → Dst IP → Dst Port  (conn.log)</title>
+        <search base="Base_Search">
+          <query>| search source="*conn.log"
+    $dst_ip_include$ $dst_ip_exclude$
+    $src_ip_include$ $src_ip_exclude$
+    $dst_port_include$ $dst_port_exclude$
+    $noise_port_suppress$
+    (id.orig_h!="f*" AND id.resp_h!="f*")
+| stats count AS count BY id.orig_h, id.resp_h
+| rename id.orig_h AS Source, id.resp_h AS Target
+| append
+    [ search index=zeek source="*conn.log"
+        $dst_ip_include$ $dst_ip_exclude$
+        $src_ip_include$ $src_ip_exclude$
+        $dst_port_include$ $dst_port_exclude$
+        $noise_port_suppress$
+        (id.orig_h!="f*" AND id.resp_h!="f*")
+    | stats count AS count BY id.resp_h, id.resp_p
+    | rename id.resp_h AS Source, id.resp_p AS Target ]
+| stats sum(count) AS Count BY Source, Target
+| sort - Count</query>
+        </search>
+        <option name="drilldown">all</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="sankey_diagram_app.sankey_diagram.colorMode">categorical</option>
+        <option name="sankey_diagram_app.sankey_diagram.maxColor">#3fc77a</option>
+        <option name="sankey_diagram_app.sankey_diagram.minColor">#d93f3c</option>
+        <option name="sankey_diagram_app.sankey_diagram.numOfBins">6</option>
+        <option name="sankey_diagram_app.sankey_diagram.showBackwards">false</option>
+        <option name="sankey_diagram_app.sankey_diagram.showLabels">true</option>
+        <option name="sankey_diagram_app.sankey_diagram.showLegend">true</option>
+        <option name="sankey_diagram_app.sankey_diagram.showSelf">false</option>
+        <option name="sankey_diagram_app.sankey_diagram.showTooltip">true</option>
+        <option name="sankey_diagram_app.sankey_diagram.styleBackwards">false</option>
+        <option name="sankey_diagram_app.sankey_diagram.useColors">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*conn.log"+($click.value|u$)</link>
+        </drilldown>
+      </viz>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <viz type="sankey_diagram_app.sankey_diagram">
+        <title>Dst IP → URI  (http.log)</title>
+        <search base="Base_Search">
+          <query>| search source="*http.log"
+    $dst_ip_include$ $dst_ip_exclude$
+    $src_ip_include$ $src_ip_exclude$
+    $dst_port_include$ $dst_port_exclude$
+    $noise_port_suppress$
+| stats count BY id.resp_h, uri
+| rename id.resp_h AS Source, uri AS Target</query>
+        </search>
+        <option name="drilldown">all</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="sankey_diagram_app.sankey_diagram.colorMode">categorical</option>
+        <option name="sankey_diagram_app.sankey_diagram.showLabels">true</option>
+        <option name="sankey_diagram_app.sankey_diagram.showLegend">true</option>
+        <option name="sankey_diagram_app.sankey_diagram.showTooltip">true</option>
+        <option name="sankey_diagram_app.sankey_diagram.useColors">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*http.log"+($click.value|u$)</link>
+        </drilldown>
+      </viz>
+    </panel>
+    <panel>
+      <viz type="sankey_diagram_app.sankey_diagram">
+        <title>File UID (fuid) → Connection UID (uid)  (files.log, non-text)</title>
+        <search base="Base_Search">
+          <query>| search $dst_ip_include$ $dst_ip_exclude$
+    $src_ip_include$ $src_ip_exclude$
+    $dst_port_include$ $dst_port_exclude$
+    $noise_port_suppress$
+    mime_type!="text*"
+| stats count BY id.resp_h, fuid
+| dedup id.resp_h
+| rename id.resp_h AS Target, fuid AS Tracked_File
+| append
+    [ search index=zeek source="*"
+        $dst_ip_include$ $dst_ip_exclude$
+        $src_ip_include$ $src_ip_exclude$
+        $dst_port_include$ $dst_port_exclude$
+        $noise_port_suppress$
+        mime_type!="text*"
+    | stats count AS count BY fuid, uid
+    | rename fuid AS File, uid AS Conversation ]
+| stats sum(count) AS Count BY File, Conversation
+| sort - File</query>
+        </search>
+        <option name="drilldown">all</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="sankey_diagram_app.sankey_diagram.colorMode">categorical</option>
+        <option name="sankey_diagram_app.sankey_diagram.showLabels">true</option>
+        <option name="sankey_diagram_app.sankey_diagram.showLegend">true</option>
+        <option name="sankey_diagram_app.sankey_diagram.showTooltip">true</option>
+        <option name="sankey_diagram_app.sankey_diagram.useColors">true</option>
+        <drilldown target="_blank">
+          <set token="drilldown_srch">index=zeek source="*" $row.Conversation|s$</set>
+          <link>search?q=$drilldown_srch|u$</link>
+        </drilldown>
+      </viz>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <viz type="sankey_diagram_app.sankey_diagram">
+        <title>Src IP → Named Pipe → Operation  (dce_rpc.log)</title>
+        <search base="Base_Search">
+          <query>| search source="*dce_rpc.log"
+    $dst_ip_include$ $dst_ip_exclude$
+    $src_ip_include$ $src_ip_exclude$
+    $dst_port_include$ $dst_port_exclude$
+    $noise_port_suppress$
+| stats count AS count BY id.orig_h, named_pipe
+| rename id.orig_h AS Source, named_pipe AS Target
+| append
+    [ search index=zeek source="*dce_rpc.log"
+        $dst_ip_include$ $dst_ip_exclude$
+        $src_ip_include$ $src_ip_exclude$
+        $dst_port_include$ $dst_port_exclude$
+        $noise_port_suppress$
+    | stats count AS count BY named_pipe, operation
+    | rename named_pipe AS Source, operation AS Target ]
+| stats sum(count) AS Count BY Source, Target
+| sort - Count</query>
+        </search>
+        <option name="drilldown">all</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="sankey_diagram_app.sankey_diagram.colorMode">categorical</option>
+        <option name="sankey_diagram_app.sankey_diagram.maxColor">#3fc77a</option>
+        <option name="sankey_diagram_app.sankey_diagram.minColor">#d93f3c</option>
+        <option name="sankey_diagram_app.sankey_diagram.numOfBins">6</option>
+        <option name="sankey_diagram_app.sankey_diagram.showBackwards">false</option>
+        <option name="sankey_diagram_app.sankey_diagram.showLabels">true</option>
+        <option name="sankey_diagram_app.sankey_diagram.showLegend">true</option>
+        <option name="sankey_diagram_app.sankey_diagram.showSelf">false</option>
+        <option name="sankey_diagram_app.sankey_diagram.showTooltip">true</option>
+        <option name="sankey_diagram_app.sankey_diagram.styleBackwards">false</option>
+        <option name="sankey_diagram_app.sankey_diagram.useColors">true</option>
+        <drilldown>
+          <link target="_self">search?q=index%3Dzeek%2Bsource%3D%22*dce_rpc.log%22%2B($click.value|u$)&amp;earliest=&amp;latest=</link>
+        </drilldown>
+      </viz>
+    </panel>
+  </row>
+</form>

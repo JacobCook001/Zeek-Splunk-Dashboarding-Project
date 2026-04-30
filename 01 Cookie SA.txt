@@ -1,0 +1,352 @@
+<form version="1.1" theme="light">
+  <label>01 - Cookies Situational Awareness</label>
+  <search id="Base_Search">
+    <query>index=zeek source="*conn.log" | fields *</query>
+    <earliest>$time_range.earliest$</earliest>
+    <latest>$time_range.latest$</latest>
+  </search>
+  <!-- Bytes Over Time -->
+  <!-- Connection count over time -->
+  <!-- Src Dst Sankey -->
+  <!-- Top Talkers -->
+  <!-- Ports -->
+  <!-- Conn state summary -->
+  <!-- Conversation durations / packets -->
+  <!-- DHCP -->
+  <!-- Analysis of connection intervals (beaconing indicator) -->
+  <fieldset submitButton="true" autoRun="true">
+    <input type="time" token="time_range" searchWhenChanged="false">
+      <label>Time Range</label>
+      <default>
+        <earliest>-24h@h</earliest>
+        <latest>now</latest>
+      </default>
+    </input>
+    <input type="multiselect" token="src_ip_include" searchWhenChanged="false">
+      <label>Source IP - Include</label>
+      <choice value="*">All</choice>
+      <fieldForLabel>id.orig_h</fieldForLabel>
+      <fieldForValue>id.orig_h</fieldForValue>
+      <search>
+        <query>index=zeek source="*conn.log" | table id.orig_h | dedup id.orig_h | sort id.orig_h</query>
+        <earliest>$time_range.earliest$</earliest>
+        <latest>$time_range.latest$</latest>
+      </search>
+      <default>*</default>
+      <initialValue>*</initialValue>
+      <valuePrefix>id.orig_h="</valuePrefix>
+      <valueSuffix>"</valueSuffix>
+      <delimiter> OR </delimiter>
+      <prefix>(</prefix>
+      <suffix>)</suffix>
+    </input>
+    <input type="multiselect" token="src_ip_exclude" searchWhenChanged="false">
+      <label>Source IP - Exclude</label>
+      <choice value="__none__">None</choice>
+      <fieldForLabel>id.orig_h</fieldForLabel>
+      <fieldForValue>id.orig_h</fieldForValue>
+      <search>
+        <query>index=zeek source="*conn.log" | table id.orig_h | dedup id.orig_h | sort id.orig_h</query>
+        <earliest>$time_range.earliest$</earliest>
+        <latest>$time_range.latest$</latest>
+      </search>
+      <default>__none__</default>
+      <initialValue>__none__</initialValue>
+      <valuePrefix>id.orig_h!="</valuePrefix>
+      <valueSuffix>"</valueSuffix>
+      <delimiter> AND </delimiter>
+      <prefix>(</prefix>
+      <suffix>)</suffix>
+    </input>
+    <input type="multiselect" token="dst_port_include" searchWhenChanged="false">
+      <label>Destination Port - Include</label>
+      <choice value="*">All</choice>
+      <fieldForLabel>id.resp_p</fieldForLabel>
+      <fieldForValue>id.resp_p</fieldForValue>
+      <search>
+        <query>index=zeek source="*conn.log" | table id.resp_p | dedup id.resp_p | sort id.resp_p</query>
+        <earliest>$time_range.earliest$</earliest>
+        <latest>$time_range.latest$</latest>
+      </search>
+      <default>*</default>
+      <initialValue>*</initialValue>
+      <valuePrefix>id.resp_p="</valuePrefix>
+      <valueSuffix>"</valueSuffix>
+      <delimiter> OR </delimiter>
+      <prefix>(</prefix>
+      <suffix>)</suffix>
+    </input>
+    <input type="multiselect" token="dst_port_exclude" searchWhenChanged="false">
+      <label>Destination Port - Exclude</label>
+      <choice value="__none__">None</choice>
+      <fieldForLabel>id.resp_p</fieldForLabel>
+      <fieldForValue>id.resp_p</fieldForValue>
+      <search>
+        <query>index=zeek source="*conn.log" | table id.resp_p | dedup id.resp_p | sort id.resp_p</query>
+        <earliest>$time_range.earliest$</earliest>
+        <latest>$time_range.latest$</latest>
+      </search>
+      <default>__none__</default>
+      <initialValue>__none__</initialValue>
+      <valuePrefix>id.resp_p!="</valuePrefix>
+      <valueSuffix>"</valueSuffix>
+      <delimiter> AND </delimiter>
+      <prefix>(</prefix>
+      <suffix>)</suffix>
+    </input>
+  </fieldset>
+  <row>
+    <panel>
+      <title>Bytes Over Time</title>
+      <chart>
+        <search base="Base_Search">
+          <query>| search $src_ip_include$ $src_ip_exclude$ $dst_port_include$ $dst_port_exclude$
+| eval total_bytes = orig_bytes + resp_bytes
+| timechart span=1m sum(orig_bytes) AS "Sent Bytes", sum(resp_bytes) AS "Received Bytes", sum(total_bytes) AS "Total Bytes"</query>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.axisTitleX.text">Time</option>
+        <option name="charting.axisTitleY.text">Bytes</option>
+        <option name="charting.chart.nullValueMode">connect</option>
+        <option name="charting.legend.placement">bottom</option>
+        <option name="charting.drilldown">all</option>
+        <option name="refresh.display">progressbar</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*conn.log"+$src_ip_include|u$+$src_ip_exclude|u$&amp;earliest=$click.name2|u$&amp;latest=$click.name2|u$</link>
+        </drilldown>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Connection Count Over Time</title>
+      <chart>
+        <search base="Base_Search">
+          <query>| search $src_ip_include$ $src_ip_exclude$ $dst_port_include$ $dst_port_exclude$
+| timechart span=5m count AS "Connections"</query>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">all</option>
+        <option name="refresh.display">progressbar</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*conn.log"+$src_ip_include|u$+$src_ip_exclude|u$&amp;earliest=$click.name2|u$&amp;latest=$click.name2|u$</link>
+        </drilldown>
+      </chart>
+    </panel>
+    <panel>
+      <title>Unusual Hours - Traffic by Hour</title>
+      <chart>
+        <search base="Base_Search">
+          <query>| search $src_ip_include$ $src_ip_exclude$ $dst_port_include$ $dst_port_exclude$
+| eval hour = strftime(_time, "%H")
+| stats count by hour
+| sort hour</query>
+        </search>
+        <option name="charting.chart">column</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Top Source Talkers</title>
+      <chart>
+        <search base="Base_Search">
+          <query>| search $src_ip_include$ $src_ip_exclude$ $dst_port_include$ $dst_port_exclude$
+| top limit=10 id.orig_h</query>
+        </search>
+        <option name="charting.chart">pie</option>
+        <option name="charting.drilldown">all</option>
+        <option name="refresh.display">progressbar</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*conn.log"+id.orig_h%3D"$click.value|u$"</link>
+        </drilldown>
+      </chart>
+    </panel>
+    <panel>
+      <title>Top Destination Talkers</title>
+      <chart>
+        <search base="Base_Search">
+          <query>| search $src_ip_include$ $src_ip_exclude$ $dst_port_include$ $dst_port_exclude$
+| top limit=10 id.resp_h</query>
+        </search>
+        <option name="charting.chart">pie</option>
+        <option name="charting.drilldown">all</option>
+        <option name="refresh.display">progressbar</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*conn.log"+id.resp_h%3D"$click.value|u$"</link>
+        </drilldown>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Top Destination Ports</title>
+      <chart>
+        <search base="Base_Search">
+          <query>| search $src_ip_include$ $src_ip_exclude$ $dst_port_include$ $dst_port_exclude$
+| top limit=10 id.resp_p</query>
+        </search>
+        <option name="charting.chart">pie</option>
+        <option name="charting.drilldown">all</option>
+        <option name="refresh.display">progressbar</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*conn.log"+id.resp_p%3D$click.value|u$</link>
+        </drilldown>
+      </chart>
+    </panel>
+    <panel>
+      <title>Rare Destination Ports</title>
+      <chart>
+        <search base="Base_Search">
+          <query>| search $src_ip_include$ $src_ip_exclude$ $dst_port_include$ $dst_port_exclude$
+| rare limit=10 id.resp_p</query>
+        </search>
+        <option name="charting.chart">pie</option>
+        <option name="charting.drilldown">all</option>
+        <option name="refresh.display">progressbar</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*conn.log"+id.resp_p%3D$click.value|u$</link>
+        </drilldown>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Connection States (conn_state)</title>
+      <chart>
+        <search base="Base_Search">
+          <query>| search $src_ip_include$ $src_ip_exclude$ $dst_port_include$ $dst_port_exclude$
+| stats count by conn_state
+| sort - count</query>
+        </search>
+        <option name="charting.chart">bar</option>
+        <option name="charting.drilldown">all</option>
+        <option name="refresh.display">progressbar</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*conn.log"+conn_state%3D"$click.value|u$"</link>
+        </drilldown>
+      </chart>
+    </panel>
+    <panel>
+      <title>Services Detected</title>
+      <chart>
+        <search base="Base_Search">
+          <query>| search $src_ip_include$ $src_ip_exclude$ $dst_port_include$ $dst_port_exclude$
+| where isnotnull(service) AND service!=""
+| top limit=15 service</query>
+        </search>
+        <option name="charting.chart">bar</option>
+        <option name="charting.drilldown">all</option>
+        <option name="refresh.display">progressbar</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*conn.log"+service%3D"$click.value|u$"</link>
+        </drilldown>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Conversation Durations and Packet Counts</title>
+      <table>
+        <search base="Base_Search">
+          <query>| search $src_ip_include$ $src_ip_exclude$ $dst_port_include$ $dst_port_exclude$
+| stats count by id.orig_h, id.resp_h, id.resp_p, duration, orig_pkts, resp_pkts, orig_bytes, resp_bytes, conn_state
+| sort - orig_bytes</query>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*conn.log"+id.orig_h%3D"$row.id.orig_h|u$"+id.resp_h%3D"$row.id.resp_h|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>DHCP - Host Inventory</title>
+      <table>
+        <search>
+          <query>index=zeek source="*dhcp.log"
+| stats count by client_addr, assigned_addr, mac, host_name, client_fqdn, domain
+| sort client_addr</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*dhcp.log"+client_addr%3D"$row.client_addr|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Connection Interval Analysis - Beaconing Candidates (port 443/80)</title>
+      <table>
+        <search base="Base_Search">
+          <query>| search $src_ip_include$ $src_ip_exclude$ (id.resp_p=443 OR id.resp_p=80 OR id.resp_p=8080)
+| transaction id.orig_h, id.resp_h maxpause=15m
+| eval interval = duration
+| stats avg(interval) as avg_interval_sec, count as sessions by id.orig_h, id.resp_h
+| eval avg_interval_sec = round(avg_interval_sec, 2)
+| where sessions &gt; 3
+| sort - sessions</query>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*conn.log"+id.orig_h%3D"$row.id.orig_h|u$"+id.resp_h%3D"$row.id.resp_h|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>RDP Inbound from External IP - Potential Unauthorized Access</title>
+      <table>
+        <search>
+          <query>index=zeek source="*conn.log"
+  id.resp_p=3389
+    conn_state IN (SF, S1, S2, S3, OTH, RSTR)
+| rename "id.orig_h" as src_ip
+         "id.resp_h" as dest_ip
+         "id.orig_p" as src_port
+         "id.resp_p" as dest_port
+
+| stats count
+        min(_time) as firstTime
+        max(_time) as lastTime
+  BY src_ip dest_ip src_port dest_port proto service
+
+| eval firstTime=strftime(firstTime, "%Y-%m-%dT%H:%M:%S"),
+       lastTime=strftime(lastTime, "%Y-%m-%dT%H:%M:%S")
+
+| where NOT (
+    src_ip IN ("10.1.2.3", "10.4.5.6")      
+    OR dest_ip IN ("10.10.1.5", "10.10.1.6") 
+  )</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+          <sampleRatio>1</sampleRatio>
+        </search>
+        <option name="count">20</option>
+        <option name="dataOverlayMode">none</option>
+        <option name="drilldown">cell</option>
+        <option name="percentagesRow">false</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="rowNumbers">false</option>
+        <option name="totalsRow">false</option>
+        <option name="wrap">true</option>
+      </table>
+    </panel>
+  </row>
+</form>

@@ -1,0 +1,245 @@
+<form version="1.1" theme="light">
+  <label>05 - DCE-RPC Activity</label>
+  <!-- Kerberos alongside DCE-RPC -->
+  <fieldset submitButton="true" autoRun="true">
+    <input type="time" token="time_range" searchWhenChanged="false">
+      <label>Time Range</label>
+      <default>
+        <earliest>-24h@h</earliest>
+        <latest>now</latest>
+      </default>
+    </input>
+    <input type="multiselect" token="src_ip_include" searchWhenChanged="false">
+      <label>Source IP - Include</label>
+      <choice value="*">All</choice>
+      <fieldForLabel>id.orig_h</fieldForLabel>
+      <fieldForValue>id.orig_h</fieldForValue>
+      <search>
+        <query>index=zeek source="*conn.log" | table id.orig_h | dedup id.orig_h | sort id.orig_h</query>
+        <earliest>$time_range.earliest$</earliest>
+        <latest>$time_range.latest$</latest>
+      </search>
+      <default>*</default>
+      <initialValue>*</initialValue>
+      <valuePrefix>id.orig_h="</valuePrefix>
+      <valueSuffix>"</valueSuffix>
+      <delimiter> OR </delimiter>
+      <prefix>(</prefix>
+      <suffix>)</suffix>
+    </input>
+    <input type="multiselect" token="src_ip_exclude" searchWhenChanged="false">
+      <label>Source IP - Exclude</label>
+      <choice value="__none__">None</choice>
+      <fieldForLabel>id.orig_h</fieldForLabel>
+      <fieldForValue>id.orig_h</fieldForValue>
+      <search>
+        <query>index=zeek source="*conn.log" | table id.orig_h | dedup id.orig_h | sort id.orig_h</query>
+        <earliest>$time_range.earliest$</earliest>
+        <latest>$time_range.latest$</latest>
+      </search>
+      <default>__none__</default>
+      <initialValue>__none__</initialValue>
+      <valuePrefix>id.orig_h!="</valuePrefix>
+      <valueSuffix>"</valueSuffix>
+      <delimiter> AND </delimiter>
+      <prefix>(</prefix>
+      <suffix>)</suffix>
+    </input>
+    <input type="multiselect" token="dst_port_include" searchWhenChanged="false">
+      <label>Destination Port - Include</label>
+      <choice value="*">All</choice>
+      <fieldForLabel>id.resp_p</fieldForLabel>
+      <fieldForValue>id.resp_p</fieldForValue>
+      <search>
+        <query>index=zeek source="*conn.log" | table id.resp_p | dedup id.resp_p | sort id.resp_p</query>
+        <earliest>$time_range.earliest$</earliest>
+        <latest>$time_range.latest$</latest>
+      </search>
+      <default>*</default>
+      <initialValue>*</initialValue>
+      <valuePrefix>id.resp_p="</valuePrefix>
+      <valueSuffix>"</valueSuffix>
+      <delimiter> OR </delimiter>
+      <prefix>(</prefix>
+      <suffix>)</suffix>
+    </input>
+    <input type="multiselect" token="dst_port_exclude" searchWhenChanged="false">
+      <label>Destination Port - Exclude</label>
+      <choice value="__none__">None</choice>
+      <fieldForLabel>id.resp_p</fieldForLabel>
+      <fieldForValue>id.resp_p</fieldForValue>
+      <search>
+        <query>index=zeek source="*conn.log" | table id.resp_p | dedup id.resp_p | sort id.resp_p</query>
+        <earliest>$time_range.earliest$</earliest>
+        <latest>$time_range.latest$</latest>
+      </search>
+      <default>__none__</default>
+      <initialValue>__none__</initialValue>
+      <valuePrefix>id.resp_p!="</valuePrefix>
+      <valueSuffix>"</valueSuffix>
+      <delimiter> AND </delimiter>
+      <prefix>(</prefix>
+      <suffix>)</suffix>
+    </input>
+  </fieldset>
+  <row>
+    <panel>
+      <title>DCE-RPC Operations Over Time</title>
+      <chart>
+        <search>
+          <query>index=zeek source="*dce_rpc.log" $src_ip_include$ $src_ip_exclude$
+| timechart span=5m count AS "DCE-RPC Calls"</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">all</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Top DCE-RPC Endpoints</title>
+      <chart>
+        <search>
+          <query>index=zeek source="*dce_rpc.log" $src_ip_include$ $src_ip_exclude$
+| top limit=15 endpoint</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="charting.chart">bar</option>
+        <option name="charting.drilldown">all</option>
+        <option name="refresh.display">progressbar</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*dce_rpc.log"+endpoint%3D"$click.value|u$"</link>
+        </drilldown>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>DCE-RPC All Operations</title>
+      <table>
+        <search>
+          <query>index=zeek source="*dce_rpc.log" $src_ip_include$ $src_ip_exclude$
+| stats count by id.orig_h, id.resp_h, id.resp_p, endpoint, operation, named_pipe, rtt, uid
+| sort - count
+| dedup uid</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*dce_rpc.log"+uid%3D"$row.uid|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Rare DCE-RPC Operations - Lateral Movement / Recon</title>
+      <table>
+        <search>
+          <query>index=zeek source="*dce_rpc.log" $src_ip_include$ $src_ip_exclude$
+| stats count by operation, endpoint, named_pipe, id.orig_h, id.resp_h
+| where count &lt; 5
+| sort count
+| dedup named_pipe</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*dce_rpc.log"+operation%3D"$row.operation|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+    <panel>
+      <title>DCE-RPC Named Pipes - High Value Targets</title>
+      <table>
+        <search>
+          <query>index=zeek source="*dce_rpc.log" $src_ip_include$ $src_ip_exclude$
+| search named_pipe="*svcctl*" OR named_pipe="*samr*" OR named_pipe="*lsarpc*" OR named_pipe="*atsvc*" OR named_pipe="*winreg*" OR named_pipe="*drsuapi*"
+| stats count by id.orig_h, id.resp_h, named_pipe, endpoint, operation, uid
+| sort - count</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*dce_rpc.log"+uid%3D"$row.uid|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>DCE-RPC Source-to-Target Summary</title>
+      <table>
+        <search>
+          <query>index=zeek source="*dce_rpc.log" $src_ip_include$ $src_ip_exclude$
+| stats count AS total_calls, dc(operation) AS unique_ops, dc(endpoint) AS unique_endpoints, dc(uid) AS sessions, values(named_pipe) AS pipes by id.orig_h, id.resp_h
+| sort - total_calls</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*dce_rpc.log"+id.orig_h%3D"$row.id.orig_h|u$"+id.resp_h%3D"$row.id.resp_h|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Kerberos Authentication (kerberos.log)</title>
+      <table>
+        <search>
+          <query>index=zeek source="*kerberos.log" $src_ip_include$ $src_ip_exclude$
+| stats count by id.orig_h, id.resp_h, request_type, client, service, success, error_msg, cipher
+| sort - count</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*kerberos.log"+id.orig_h%3D"$row.id.orig_h|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+    <panel>
+      <title>Kerberos Failures</title>
+      <table>
+        <search>
+          <query>index=zeek source="*kerberos.log" $src_ip_include$ $src_ip_exclude$
+| search success=false OR success="false"
+| stats count by id.orig_h, id.resp_h, client, service, error_msg
+| sort - count</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*kerberos.log"+id.orig_h%3D"$row.id.orig_h|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+</form>

@@ -1,0 +1,156 @@
+<form version="1.1" theme="light">
+  <label>06 - Notice Log &amp; BZAR Alerts</label>
+  <fieldset submitButton="true" autoRun="true">
+    <input type="time" token="time_range" searchWhenChanged="false">
+      <label>Time Range</label>
+      <default>
+        <earliest>-24h@h</earliest>
+        <latest>now</latest>
+      </default>
+    </input>
+    <input type="multiselect" token="src_ip_include" searchWhenChanged="false">
+      <label>Source IP - Include</label>
+      <choice value="*">All</choice>
+      <fieldForLabel>id.orig_h</fieldForLabel>
+      <fieldForValue>id.orig_h</fieldForValue>
+      <search>
+        <query>index=zeek source="*conn.log" | table id.orig_h | dedup id.orig_h | sort id.orig_h</query>
+        <earliest>$time_range.earliest$</earliest>
+        <latest>$time_range.latest$</latest>
+      </search>
+      <default>*</default>
+      <initialValue>*</initialValue>
+      <valuePrefix>id.orig_h="</valuePrefix>
+      <valueSuffix>"</valueSuffix>
+      <delimiter> OR </delimiter>
+      <prefix>(</prefix>
+      <suffix>)</suffix>
+    </input>
+    <input type="multiselect" token="src_ip_exclude" searchWhenChanged="false">
+      <label>Source IP - Exclude</label>
+      <choice value="__none__">None</choice>
+      <fieldForLabel>id.orig_h</fieldForLabel>
+      <fieldForValue>id.orig_h</fieldForValue>
+      <search>
+        <query>index=zeek source="*conn.log" | table id.orig_h | dedup id.orig_h | sort id.orig_h</query>
+        <earliest>$time_range.earliest$</earliest>
+        <latest>$time_range.latest$</latest>
+      </search>
+      <default>__none__</default>
+      <initialValue>__none__</initialValue>
+      <valuePrefix>id.orig_h!="</valuePrefix>
+      <valueSuffix>"</valueSuffix>
+      <delimiter> AND </delimiter>
+      <prefix>(</prefix>
+      <suffix>)</suffix>
+    </input>
+    <input type="multiselect" token="dst_port_include" searchWhenChanged="false">
+      <label>Destination Port - Include</label>
+      <choice value="*">All</choice>
+      <fieldForLabel>id.resp_p</fieldForLabel>
+      <fieldForValue>id.resp_p</fieldForValue>
+      <search>
+        <query>index=zeek source="*conn.log" | table id.resp_p | dedup id.resp_p | sort id.resp_p</query>
+        <earliest>$time_range.earliest$</earliest>
+        <latest>$time_range.latest$</latest>
+      </search>
+      <default>*</default>
+      <initialValue>*</initialValue>
+      <valuePrefix>id.resp_p="</valuePrefix>
+      <valueSuffix>"</valueSuffix>
+      <delimiter> OR </delimiter>
+      <prefix>(</prefix>
+      <suffix>)</suffix>
+    </input>
+    <input type="multiselect" token="dst_port_exclude" searchWhenChanged="false">
+      <label>Destination Port - Exclude</label>
+      <choice value="__none__">None</choice>
+      <fieldForLabel>id.resp_p</fieldForLabel>
+      <fieldForValue>id.resp_p</fieldForValue>
+      <search>
+        <query>index=zeek source="*conn.log" | table id.resp_p | dedup id.resp_p | sort id.resp_p</query>
+        <earliest>$time_range.earliest$</earliest>
+        <latest>$time_range.latest$</latest>
+      </search>
+      <default>__none__</default>
+      <initialValue>__none__</initialValue>
+      <valuePrefix>id.resp_p!="</valuePrefix>
+      <valueSuffix>"</valueSuffix>
+      <delimiter> AND </delimiter>
+      <prefix>(</prefix>
+      <suffix>)</suffix>
+    </input>
+  </fieldset>
+
+  <row>
+    <panel><title>Notice Events Over Time</title>
+      <chart><search><query>index=zeek source="*notice.log" $src_ip_include$ $src_ip_exclude$
+| timechart span=5m count AS "Notices"</query>
+        <earliest>$time_range.earliest$</earliest><latest>$time_range.latest$</latest></search>
+      <option name="charting.chart">line</option><option name="charting.drilldown">all</option><option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel><title>Top Notice Types</title>
+      <chart><search><query>index=zeek source="*notice.log" $src_ip_include$ $src_ip_exclude$
+| top limit=15 note</query>
+        <earliest>$time_range.earliest$</earliest><latest>$time_range.latest$</latest></search>
+      <option name="charting.chart">bar</option><option name="charting.drilldown">all</option><option name="refresh.display">progressbar</option>
+      <drilldown target="_blank"><link>search?q=index%3Dzeek+source%3D"*notice.log"+note%3D"$click.value|u$"</link></drilldown>
+      </chart>
+    </panel>
+  </row>
+
+  <!-- All notices -->
+  <row><panel><title>All Notice Log Events</title>
+    <table><search><query>index=zeek source="*notice.log" $src_ip_include$ $src_ip_exclude$
+| stats count by _time, id.orig_h, id.resp_h, id.resp_p, proto, note, msg, sub, src, dst, uid
+| sort - _time</query>
+      <earliest>$time_range.earliest$</earliest><latest>$time_range.latest$</latest></search>
+    <option name="count">20</option><option name="drilldown">cell</option><option name="refresh.display">progressbar</option><option name="wrap">true</option>
+    <drilldown target="_blank"><link>search?q=index%3Dzeek+source%3D"*"+uid%3D"$row.uid|u$"</link></drilldown>
+    </table></panel></row>
+
+  <!-- BZAR - notices with BZAR/lateral movement note types -->
+  <row><panel><title>BZAR - Lateral Movement Alerts (ATT&amp;CK TTPs via DCE-RPC/SMB)</title>
+    <table><search><query>index=zeek source="*notice.log" $src_ip_include$ $src_ip_exclude$
+| search note="ATTACK::*" OR note="BZAR::*" OR note="*lateral*" OR note="*Lateral*" OR note="*DCE_RPC*" OR note="*SMB*" OR note="*Ransomware*"
+| stats count by _time, id.orig_h, id.resp_h, note, msg, sub, uid
+| sort - _time</query>
+      <earliest>$time_range.earliest$</earliest><latest>$time_range.latest$</latest></search>
+    <option name="count">20</option><option name="drilldown">cell</option><option name="refresh.display">progressbar</option><option name="wrap">true</option>
+    <drilldown target="_blank"><link>search?q=index%3Dzeek+source%3D"*"+uid%3D"$row.uid|u$"</link></drilldown>
+    </table></panel></row>
+
+  <row>
+    <panel><title>BZAR Notice Source Hosts</title>
+      <chart><search><query>index=zeek source="*notice.log" $src_ip_include$ $src_ip_exclude$
+| search note="ATTACK::*" OR note="BZAR::*"
+| top limit=10 id.orig_h</query>
+        <earliest>$time_range.earliest$</earliest><latest>$time_range.latest$</latest></search>
+      <option name="charting.chart">pie</option><option name="charting.drilldown">all</option><option name="refresh.display">progressbar</option>
+      <drilldown target="_blank"><link>search?q=index%3Dzeek+source%3D"*notice.log"+id.orig_h%3D"$click.value|u$"</link></drilldown>
+      </chart>
+    </panel>
+    <panel><title>Intel Log - Indicator Matches</title>
+      <table><search><query>index=zeek source="*intel.log" $src_ip_include$ $src_ip_exclude$
+| stats count by _time, id.orig_h, id.resp_h, seen.indicator, seen.indicator_type, matched, sources, uid
+| sort - _time</query>
+        <earliest>$time_range.earliest$</earliest><latest>$time_range.latest$</latest></search>
+      <option name="count">20</option><option name="drilldown">cell</option><option name="refresh.display">progressbar</option><option name="wrap">true</option>
+      <drilldown target="_blank"><link>search?q=index%3Dzeek+source%3D"*"+uid%3D"$row.uid|u$"</link></drilldown>
+      </table>
+    </panel>
+  </row>
+
+  <!-- Dropped IPs -->
+  <row><panel><title>Dropped IPs (dropped=true in notice.log)</title>
+    <table><search><query>index=zeek source="*notice.log" $src_ip_include$ $src_ip_exclude$
+| search dropped=true OR dropped="true"
+| stats count by src, dst, note, msg
+| sort - count</query>
+      <earliest>$time_range.earliest$</earliest><latest>$time_range.latest$</latest></search>
+    <option name="count">20</option><option name="drilldown">cell</option><option name="refresh.display">progressbar</option><option name="wrap">true</option>
+    <drilldown target="_blank"><link>search?q=index%3Dzeek+source%3D"*notice.log"+src%3D"$row.src|u$"</link></drilldown>
+    </table></panel></row>
+
+</form>

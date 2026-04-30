@@ -1,0 +1,84 @@
+<dashboard version="1.1" theme="dark">
+  <label>Jack_TTPs</label>
+  <description>TTP's for Mitre Attack</description>
+  <row>
+    <panel>
+      <table>
+        <title>Notice Log</title>
+        <search>
+          <query>index=zeek sourcetype="zeek:notice"
+| stats count by ts note msg</query>
+          <earliest>-15m</earliest>
+          <latest>now</latest>
+          <refresh>2m</refresh>
+          <refreshType>delay</refreshType>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>ACTIVE SCANNING T1595</title>
+      <table>
+        <title>Active Scanning</title>
+        <search>
+          <query>index=zeek   sourcetype="zeek:conn" id.orig_h!="*10.1.1*" id.orig_h!="fe80*" id.orig_h="*100.99.88*"  "id.resp_h"!="224.0.0.251" id.resp_h="*100.80.33*" 
+| stats  count by id.orig_h id.resp_h id.resp_p orig_ip_bytes</query>
+          <earliest>-4h@m</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+    <panel>
+      <title>ACTIVE SCANNING T1595</title>
+      <table>
+        <title>Odd Ports</title>
+        <search>
+          <query>index=zeek sourcetype="zeek:conn" id.orig_h!="*10.1.1*" id.orig_h="*100.80.33.*" 
+| stats count by id.orig_h id.resp_h id.resp_p</query>
+          <earliest>-15m</earliest>
+          <latest>now</latest>
+          <refresh>2m</refresh>
+          <refreshType>delay</refreshType>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Brute Force</title>
+      <table>
+        <title>Brute Force by RDP</title>
+        <search>
+          <query>index=zeek sourcetype="zeek:conn" id.resp_p=3389
+| stats count by id.orig_h id.resp_h id.resp_p
+| sort -count</query>
+          <earliest>-4h@m</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <table>
+        <title>DCE_RPC</title>
+        <search>
+          <query>index=zeek "id.orig_h"="10.1.1.104" sourcetype="zeek:dce_rpc" | stats count by id.orig_h id.resp_h endpoint named_pipe operation | sort ts</query>
+          <earliest>-60m@m</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+  </row>
+</dashboard>

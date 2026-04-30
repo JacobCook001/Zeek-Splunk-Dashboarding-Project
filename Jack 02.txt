@@ -1,0 +1,220 @@
+<dashboard version="1.1" theme="dark">
+  <label>Jackilus DashyBoard</label>
+  <description>My cute little dashyboard</description>
+  <row>
+    <panel>
+      <title>Sankey Connections SRC -&gt; Dest -&gt; Port number</title>
+      <viz type="sankey_diagram_app.sankey_diagram">
+        <title>Sankey Subnet</title>
+        <search>
+          <query>index=zeek sourcetype="zeek:conn"
+| rename id.orig_h as src_ip, id.resp_h as dest_ip, id.resp_p as dest_port
+| where cidrmatch("0.0.0.0/0", src_ip) AND cidrmatch("0.0.0.0/0", dest_ip)
+| where cidrmatch("10.1.1.0/24", dest_ip) OR cidrmatch("100.0.0.0/8", dest_ip)
+| stats count by src_ip, dest_ip, dest_port
+| eval pair=mvappend(src_ip."|||"."dst:".dest_ip, "dst:".dest_ip."|||"."Port:".dest_port)
+| mvexpand pair
+| rex field=pair "^(?P&lt;src&gt;[^\|]+)\|\|\|(?P&lt;dest&gt;.+)"
+| stats sum(count) as count by src, dest</query>
+          <earliest>-4h@m</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="height">757</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="sankey_diagram_app.sankey_diagram.colorMode">categorical</option>
+        <option name="sankey_diagram_app.sankey_diagram.maxColor">#3fc77a</option>
+        <option name="sankey_diagram_app.sankey_diagram.minColor">#d93f3c</option>
+        <option name="sankey_diagram_app.sankey_diagram.numOfBins">6</option>
+        <option name="sankey_diagram_app.sankey_diagram.showBackwards">false</option>
+        <option name="sankey_diagram_app.sankey_diagram.showLabels">true</option>
+        <option name="sankey_diagram_app.sankey_diagram.showLegend">true</option>
+        <option name="sankey_diagram_app.sankey_diagram.showSelf">false</option>
+        <option name="sankey_diagram_app.sankey_diagram.showTooltip">true</option>
+        <option name="sankey_diagram_app.sankey_diagram.styleBackwards">false</option>
+        <option name="sankey_diagram_app.sankey_diagram.useColors">true</option>
+      </viz>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <viz type="sankey_diagram_app.sankey_diagram">
+        <title>Sankey Outside of subnet range</title>
+        <search>
+          <query>index=zeek sourcetype="zeek:conn"
+| rename id.orig_h as src_ip, id.resp_h as dest_ip, id.resp_p as dest_port
+| where cidrmatch("0.0.0.0/0", src_ip) AND cidrmatch("0.0.0.0/0", dest_ip)
+| where NOT cidrmatch("10.1.1.0/24", dest_ip) AND NOT cidrmatch("100.0.0.0/8", dest_ip)
+| where NOT (like(dest_ip, "20.%") OR like(dest_ip, "52.%") OR like(dest_ip, "192.%") OR like(dest_ip, "72.%") OR like(dest_ip, "104.%") OR like(dest_ip, "224.%") OR like(dest_ip, "169.%") OR like(dest_ip, "23.%"))
+| stats count by src_ip, dest_ip, dest_port
+| eval pair=mvappend(src_ip."|||"."dst:".dest_ip, "dst:".dest_ip."|||"."Port:".dest_port)
+| mvexpand pair
+| rex field=pair "^(?P&lt;src&gt;[^\|]+)\|\|\|(?P&lt;dest&gt;.+)"
+| stats sum(count) as count by src, dest</query>
+          <earliest>-4h@m</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="height">1000</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="sankey_diagram_app.sankey_diagram.colorMode">categorical</option>
+        <option name="sankey_diagram_app.sankey_diagram.maxColor">#1182f3</option>
+        <option name="sankey_diagram_app.sankey_diagram.minColor">#d41f1f</option>
+        <option name="sankey_diagram_app.sankey_diagram.numOfBins">6</option>
+        <option name="sankey_diagram_app.sankey_diagram.showBackwards">true</option>
+        <option name="sankey_diagram_app.sankey_diagram.showLabels">true</option>
+        <option name="sankey_diagram_app.sankey_diagram.showLegend">true</option>
+        <option name="sankey_diagram_app.sankey_diagram.showSelf">false</option>
+        <option name="sankey_diagram_app.sankey_diagram.showTooltip">true</option>
+        <option name="sankey_diagram_app.sankey_diagram.styleBackwards">true</option>
+        <option name="sankey_diagram_app.sankey_diagram.useColors">true</option>
+      </viz>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Conn</title>
+      <chart>
+        <title>Destination Ports / No Ephemeral</title>
+        <search>
+          <query>index=zeek sourcetype="zeek:conn" id.resp_p &lt; 49152| stats count by id.resp_p</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="charting.chart">pie</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>HTTP</title>
+      <table>
+        <title>Referrer to URI</title>
+        <search>
+          <query>index=zeek sourcetype="zeek:http"
+| stats count by method referrer uri resp_mime_types{}</query>
+          <earliest>-4h@m</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+    <panel>
+      <title>HTTP</title>
+      <table>
+        <title>User Agents</title>
+        <search>
+          <query>index=zeek sourcetype="zeek:http" 
+| table user_agent | dedup user_agent</query>
+          <earliest>-4h@m</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <table>
+        <title>INFOEFEO</title>
+        <search>
+          <query>index=zeek sourcetype="zeek:http"
+| table id.orig_h id.resp_h method referrer | dedup id.orig_h id.resp_h method referrer</query>
+          <earliest>-4h@m</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+    <panel>
+      <table>
+        <title>HTTP Traffic from potentially malicious actor</title>
+        <search>
+          <query>index=zeek sourcetype="zeek:http" id.resp_h="100.80.33.24" 
+| stats count by id.orig_h id.resp_h id.resp_p uri</query>
+          <earliest>-60m@m</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <table>
+        <title>DHCP Informacion</title>
+        <search>
+          <query>index=zeek sourcetype="zeek:dhcp"
+| stats count by client_addr host_name mac server_addr</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <table>
+        <title>Users</title>
+        <search>
+          <query>index=zeek source="*kerberos.log"
+| where NOT match(_raw, "(?i)framework")
+| table client id.orig_h
+| dedup client id.orig_h</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <table>
+        <title>SMB Share information</title>
+        <search>
+          <query>index=zeek source="*smb_files.log"
+| rename id.orig_h as src_ip, id.resp_h as dest_ip
+| stats
+    count as total_actions,
+    dc(name) as unique_files,
+    dc(path) as unique_paths,
+    dc(dest_ip) as unique_dest_hosts,
+    values(action) as actions_performed,
+    values(path) as paths_accessed,
+    earliest(_time) as first_seen,
+    latest(_time) as last_seen
+    by src_ip
+| eval duration_mins=round((last_seen-first_seen)/60, 1)
+| convert ctime(first_seen) ctime(last_seen)
+| sort -total_actions
+| head 10
+| rename
+    src_ip as "Source IP",
+    total_actions as "Total Actions",
+    unique_files as "Unique Files",
+    unique_paths as "Unique Paths",
+    unique_dest_hosts as "Unique Dest Hosts",
+    actions_performed as "Actions Performed",
+    paths_accessed as "Paths Accessed",
+    first_seen as "First Seen",
+    last_seen as "Last Seen",
+    duration_mins as "Duration (mins)"</query>
+          <earliest>-4h@m</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+  </row>
+</dashboard>

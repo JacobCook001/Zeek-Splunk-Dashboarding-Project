@@ -1,0 +1,697 @@
+<form version="1.1" theme="light">
+  <label>04 - Cookies Exfil — Bytes Leaving the Network</label>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- DATA MODEL                                                          -->
+  <!-- All "outbound" is defined as:                                       -->
+  <!--   id.orig_h = RFC1918 internal host                                -->
+  <!--   id.resp_h = non-RFC1918 external IP                              -->
+  <!-- orig_bytes = bytes sent BY the internal host (the exfil direction) -->
+  <!-- resp_bytes = bytes received FROM external (downloads, C2 replies)  -->
+  <!--                                                                     -->
+  <!-- RFC1918 ranges used throughout:                                     -->
+  <!--   10.0.0.0/8      ^10\.                                            -->
+  <!--   172.16-31.0/12  ^172\.(1[6-9]|2[0-9]|3[01])\.                  -->
+  <!--   192.168.0.0/16  ^192\.168\.                                      -->
+  <!--                                                                     -->
+  <!-- Sources used:                                                       -->
+  <!--   conn.log  — all IP/TCP/UDP flows, orig_bytes / resp_bytes        -->
+  <!--   http.log  — request_body_len (POST/PUT uploads)                  -->
+  <!--   ftp.log   — STOR/RETR, file_size                                 -->
+  <!--   dns.log   — query length, volume (tunnelling)                    -->
+  <!--   smtp.log  — outbound email + attachment fuids                    -->
+  <!--   ssl.log   — encrypted channel byte volumes                       -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+
+  <search id="Base_Search">
+    <query>index=zeek | fields *</query>
+    <earliest>$time_range.earliest$</earliest>
+    <latest>$time_range.latest$</latest>
+  </search>
+
+  <fieldset submitButton="true" autoRun="true">
+
+    <input type="time" token="time_range" searchWhenChanged="false">
+      <label>Time Range</label>
+      <default>
+        <earliest>-24h@h</earliest>
+        <latest>now</latest>
+      </default>
+    </input>
+
+    <!-- ── Source IP — Include ────────────────────────────────────────── -->
+    <input type="multiselect" token="src_ip_include" searchWhenChanged="false">
+      <label>Source IP — Include</label>
+      <choice value="*">All</choice>
+      <fieldForLabel>id.orig_h</fieldForLabel>
+      <fieldForValue>id.orig_h</fieldForValue>
+      <search base="Base_Search">
+        <query>| search source="*conn.log"
+| table id.orig_h | dedup id.orig_h | sort id.orig_h</query>
+      </search>
+      <default>*</default>
+      <initialValue>*</initialValue>
+      <valuePrefix>id.orig_h="</valuePrefix>
+      <valueSuffix>"</valueSuffix>
+      <delimiter> OR </delimiter>
+      <prefix>(</prefix>
+      <suffix>)</suffix>
+    </input>
+
+    <!-- ── Source IP — Exclude ───────────────────────────────────────── -->
+    <input type="multiselect" token="src_ip_exclude" searchWhenChanged="false">
+      <label>Source IP — Exclude</label>
+      <choice value="__none__">None</choice>
+      <fieldForLabel>id.orig_h</fieldForLabel>
+      <fieldForValue>id.orig_h</fieldForValue>
+      <search base="Base_Search">
+        <query>| search source="*conn.log"
+| table id.orig_h | dedup id.orig_h | sort id.orig_h</query>
+      </search>
+      <default>__none__</default>
+      <initialValue>__none__</initialValue>
+      <valuePrefix>id.orig_h!="</valuePrefix>
+      <valueSuffix>"</valueSuffix>
+      <delimiter> AND </delimiter>
+      <prefix>(</prefix>
+      <suffix>)</suffix>
+    </input>
+
+    <!-- ── Destination Port — Exclude ────────────────────────────────── -->
+    <!--
+      Lets analysts strip known-good high-volume ports (e.g. 443 for
+      corporate browsing) to surface anomalous transfer ports cleanly.
+    -->
+    <input type="multiselect" token="dst_port_exclude" searchWhenChanged="false">
+      <label>Destination Port — Exclude</label>
+      <choice value="__none__">None</choice>
+      <fieldForLabel>id.resp_p</fieldForLabel>
+      <fieldForValue>id.resp_p</fieldForValue>
+      <search base="Base_Search">
+        <query>| search source="*conn.log"
+| table id.resp_p | dedup id.resp_p | sort id.resp_p</query>
+      </search>
+      <default>__none__</default>
+      <initialValue>__none__</initialValue>
+      <valuePrefix>id.resp_p!="</valuePrefix>
+      <valueSuffix>"</valueSuffix>
+      <delimiter> AND </delimiter>
+      <prefix>(</prefix>
+      <suffix>)</suffix>
+    </input>
+
+  </fieldset>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- ROW 0: SUMMARY SINGLE-VALUE PANELS                                 -->
+  <!-- Quick headline numbers for situational awareness                   -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <row>
+    <panel>
+      <title>Total Outbound Bytes (External)</title>
+      <single>
+        <search base="Base_Search">
+          <query>| search source="*conn.log" $src_ip_include$ $src_ip_exclude$ $dst_port_exclude$
+| where NOT match(id.resp_h, "^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)")
+| stats sum(orig_bytes) AS total_out
+| eval total_gb = round(total_out/1073741824, 3)
+| fields total_gb</query>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="unit">GB</option>
+        <option name="refresh.display">progressbar</option>
+      </single>
+    </panel>
+    <panel>
+      <title>Unique Internal Hosts Sending Outbound</title>
+      <single>
+        <search base="Base_Search">
+          <query>| search source="*conn.log" $src_ip_include$ $src_ip_exclude$ $dst_port_exclude$
+| where NOT match(id.resp_h, "^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)")
+      AND orig_bytes &gt; 0
+| stats dc(id.orig_h) AS unique_senders
+| fields unique_senders</query>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </single>
+    </panel>
+    <panel>
+      <title>Unique External Destinations Receiving Data</title>
+      <single>
+        <search base="Base_Search">
+          <query>| search source="*conn.log" $src_ip_include$ $src_ip_exclude$ $dst_port_exclude$
+| where NOT match(id.resp_h, "^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)")
+      AND orig_bytes &gt; 0
+| stats dc(id.resp_h) AS unique_dsts
+| fields unique_dsts</query>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </single>
+    </panel>
+    <panel>
+      <title>Connections &gt; 50MB Outbound</title>
+      <single>
+        <search base="Base_Search">
+          <query>| search source="*conn.log" $src_ip_include$ $src_ip_exclude$ $dst_port_exclude$
+| where NOT match(id.resp_h, "^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)")
+      AND orig_bytes &gt; 52428800
+| stats count AS large_transfers
+| fields large_transfers</query>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </single>
+    </panel>
+  </row>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- ROW 1: OUTBOUND BYTES OVER TIME                                    -->
+  <!-- ─────────────────────────────────────────────────────────────────── -->
+  <!-- Timechart of orig_bytes (sent) vs resp_bytes (received) to         -->
+  <!-- external IPs. A spike in orig_bytes with flat resp_bytes is the    -->
+  <!-- classic exfil signature — data leaving without proportional inbound -->
+  <!-- response (unlike normal browsing where resp_bytes dominates).      -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <row>
+    <panel>
+      <title>Outbound vs Inbound Bytes Over Time — External Traffic (conn.log)</title>
+      <chart>
+        <search base="Base_Search">
+          <query>| search source="*conn.log" $src_ip_include$ $src_ip_exclude$ $dst_port_exclude$
+| where NOT match(id.resp_h, "^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)")
+| timechart span=5m
+    sum(orig_bytes) AS "Sent (Outbound)",
+    sum(resp_bytes) AS "Received (Inbound)"</query>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.axisTitleX.text">Time</option>
+        <option name="charting.axisTitleY.text">Bytes</option>
+        <option name="charting.chart.nullValueMode">connect</option>
+        <option name="charting.legend.placement">bottom</option>
+        <option name="charting.seriesColors">[0xd93f3c,0x3fc77a]</option>
+        <option name="charting.drilldown">all</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- ROW 2: TOP TALKERS BY OUTBOUND BYTES                               -->
+  <!-- ─────────────────────────────────────────────────────────────────── -->
+  <!-- Left: internal hosts ranked by total orig_bytes to external IPs    -->
+  <!-- Right: external destinations ranked by bytes received from inside  -->
+  <!-- Both filtered to only connections where data actually left          -->
+  <!-- (orig_bytes > 0) to avoid counting SYN-only or failed connections. -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <row>
+    <panel>
+      <title>Top Internal Hosts by Outbound Bytes (conn.log)</title>
+      <table>
+        <search base="Base_Search">
+          <query>| search source="*conn.log" $src_ip_include$ $src_ip_exclude$ $dst_port_exclude$
+| where NOT match(id.resp_h, "^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)")
+      AND orig_bytes &gt; 0
+| stats sum(orig_bytes) AS total_out_bytes,
+        sum(resp_bytes) AS total_in_bytes,
+        dc(id.resp_h) AS unique_dsts,
+        dc(id.resp_p) AS unique_ports,
+        count AS connections
+    by id.orig_h
+| eval out_mb = round(total_out_bytes/1048576, 2)
+| eval in_mb  = round(total_in_bytes/1048576, 2)
+| eval ratio  = round(total_out_bytes / (total_in_bytes + 1), 2)
+| table id.orig_h, out_mb, in_mb, ratio, connections, unique_dsts, unique_ports
+| rename id.orig_h AS "Source IP", out_mb AS "Sent (MB)", in_mb AS "Recv (MB)",
+         ratio AS "Out:In Ratio", connections AS "Connections",
+         unique_dsts AS "Unique Dsts", unique_ports AS "Unique Ports"
+| sort - "Sent (MB)"</query>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*conn.log"+id.orig_h%3D"$row.Source IP|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+    <panel>
+      <title>Top External Destinations by Bytes Received (conn.log)</title>
+      <table>
+        <search base="Base_Search">
+          <query>| search source="*conn.log" $src_ip_include$ $src_ip_exclude$ $dst_port_exclude$
+| where NOT match(id.resp_h, "^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)")
+      AND orig_bytes &gt; 0
+| stats sum(orig_bytes) AS total_received,
+        dc(id.orig_h) AS unique_senders,
+        dc(id.resp_p) AS unique_ports,
+        values(id.resp_p) AS ports,
+        values(service) AS services,
+        count AS connections
+    by id.resp_h
+| eval recv_mb = round(total_received/1048576, 2)
+| table id.resp_h, recv_mb, connections, unique_senders, unique_ports, ports, services
+| rename id.resp_h AS "Destination IP", recv_mb AS "Bytes Recv (MB)",
+         connections AS "Connections", unique_senders AS "Unique Senders",
+         unique_ports AS "Unique Ports"
+| sort - "Bytes Recv (MB)"</query>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*conn.log"+id.resp_h%3D"$row.Destination IP|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- ROW 3: OUTBOUND BYTES BY PORT / SERVICE                            -->
+  <!-- ─────────────────────────────────────────────────────────────────── -->
+  <!-- Breaks down exfil volume by destination port and protocol service. -->
+  <!-- Helps identify if bulk transfer is happening on expected ports     -->
+  <!-- (443 HTTPS) or suspicious ones (non-standard high ports, 4444 etc) -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <row>
+    <panel>
+      <title>Outbound Bytes by Destination Port (conn.log)</title>
+      <chart>
+        <search base="Base_Search">
+          <query>| search source="*conn.log" $src_ip_include$ $src_ip_exclude$ $dst_port_exclude$
+| where NOT match(id.resp_h, "^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)")
+      AND orig_bytes &gt; 0
+| eval port_label = id.resp_p . "/" . if(service!="", service, proto)
+| stats sum(orig_bytes) AS total_bytes by port_label
+| eval total_mb = round(total_bytes/1048576, 2)
+| sort - total_mb
+| head 15</query>
+        </search>
+        <option name="charting.chart">bar</option>
+        <option name="charting.axisTitleX.text">Port / Service</option>
+        <option name="charting.axisTitleY.text">Bytes Sent (MB)</option>
+        <option name="charting.drilldown">all</option>
+        <option name="charting.legend.placement">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Outbound Bytes by Service (conn.log)</title>
+      <chart>
+        <search base="Base_Search">
+          <query>| search source="*conn.log" $src_ip_include$ $src_ip_exclude$ $dst_port_exclude$
+| where NOT match(id.resp_h, "^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)")
+      AND orig_bytes &gt; 0
+| eval svc = if(service!="" AND service!="?", service, "unknown/"+proto)
+| stats sum(orig_bytes) AS total_bytes by svc
+| eval total_mb = round(total_bytes/1048576, 2)
+| sort - total_mb</query>
+        </search>
+        <option name="charting.chart">pie</option>
+        <option name="charting.drilldown">all</option>
+        <option name="charting.legend.placement">right</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- ROW 4: LARGE SINGLE CONNECTIONS                                    -->
+  <!-- ─────────────────────────────────────────────────────────────────── -->
+  <!-- Individual connections where orig_bytes > 10MB.                    -->
+  <!-- Legitimate large transfers (OS updates, backups, video) tend to go -->
+  <!-- to known CDN IPs on port 443. Anomalous exfil tends to:           -->
+  <!--   - Use non-standard ports                                         -->
+  <!--   - Target IPs with no DNS name (direct-to-IP)                    -->
+  <!--   - Have high out:in ratio (no response data expected)            -->
+  <!-- out_in_ratio column makes these patterns immediately visible.      -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <row>
+    <panel>
+      <title>Large Single Connections &gt;10MB Outbound (conn.log)</title>
+      <table>
+        <search base="Base_Search">
+          <query>| search source="*conn.log" $src_ip_include$ $src_ip_exclude$ $dst_port_exclude$
+| where NOT match(id.resp_h, "^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)")
+      AND orig_bytes &gt; 10485760
+| eval out_mb       = round(orig_bytes/1048576, 2)
+| eval in_mb        = round(resp_bytes/1048576, 2)
+| eval out_in_ratio = round(orig_bytes / (resp_bytes + 1), 2)
+| eval duration_min = round(duration/60, 2)
+| table ts, id.orig_h, id.resp_h, id.resp_p, proto, service,
+        out_mb, in_mb, out_in_ratio, duration_min, conn_state, uid
+| rename ts AS "Time", id.orig_h AS "Source", id.resp_h AS "Destination",
+         id.resp_p AS "Port", out_mb AS "Sent (MB)", in_mb AS "Recv (MB)",
+         out_in_ratio AS "Out:In Ratio", duration_min AS "Duration (min)",
+         conn_state AS "State"
+| sort - "Sent (MB)"</query>
+        </search>
+        <option name="count">50</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*conn.log"+uid%3D"$row.uid|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- ROW 5: SUSTAINED OUTBOUND TRANSFER — ACCUMULATION VIEW            -->
+  <!-- ─────────────────────────────────────────────────────────────────── -->
+  <!-- Groups by src→dst pair and sums all connections between them.      -->
+  <!-- An attacker draining data across many small connections to avoid   -->
+  <!-- per-connection thresholds will appear here even if no single       -->
+  <!-- connection was large enough to trigger ROW 4.                      -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <row>
+    <panel>
+      <title>Cumulative Outbound by Src→Dst Pair (all connections summed) (conn.log)</title>
+      <table>
+        <search base="Base_Search">
+          <query>| search source="*conn.log" $src_ip_include$ $src_ip_exclude$ $dst_port_exclude$
+| where NOT match(id.resp_h, "^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)")
+      AND orig_bytes &gt; 0
+| stats sum(orig_bytes) AS total_sent,
+        sum(resp_bytes) AS total_recv,
+        count AS connections,
+        dc(id.resp_p) AS unique_ports,
+        values(service) AS services,
+        min(ts) AS first_seen,
+        max(ts) AS last_seen
+    by id.orig_h, id.resp_h
+| eval sent_mb      = round(total_sent/1048576, 2)
+| eval recv_mb      = round(total_recv/1048576, 2)
+| eval out_in_ratio = round(total_sent / (total_recv + 1), 2)
+| where sent_mb &gt; 1
+| table id.orig_h, id.resp_h, sent_mb, recv_mb, out_in_ratio,
+        connections, unique_ports, services, first_seen, last_seen
+| rename id.orig_h AS "Source", id.resp_h AS "Destination",
+         sent_mb AS "Total Sent (MB)", recv_mb AS "Total Recv (MB)",
+         out_in_ratio AS "Out:In Ratio", connections AS "Connections",
+         unique_ports AS "Unique Ports", first_seen AS "First Seen",
+         last_seen AS "Last Seen"
+| sort - "Total Sent (MB)"</query>
+        </search>
+        <option name="count">50</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*conn.log"+id.orig_h%3D"$row.Source|u$"+id.resp_h%3D"$row.Destination|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- ROW 6: HTTP UPLOAD DETECTION                                       -->
+  <!-- ─────────────────────────────────────────────────────────────────── -->
+  <!-- request_body_len = bytes the internal host sent in the HTTP body.  -->
+  <!-- POST/PUT with large request bodies = data being uploaded.          -->
+  <!-- This is distinct from conn.log orig_bytes which includes headers.  -->
+  <!-- Covers cloud storage abuse (OneDrive, Dropbox, S3), webshell       -->
+  <!-- exfil, and C2 HTTP channel uploads.                                -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <row>
+    <panel>
+      <title>HTTP Uploads — POST/PUT with Body Data to External (http.log)</title>
+      <table>
+        <search base="Base_Search">
+          <query>| search source="*http.log" $src_ip_include$ $src_ip_exclude$ $dst_port_exclude$
+| where NOT match(id.resp_h, "^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)")
+      AND (method="POST" OR method="PUT" OR method="PATCH")
+      AND request_body_len &gt; 0
+| eval req_kb = round(request_body_len/1024, 2)
+| stats sum(request_body_len) AS total_upload,
+        count AS requests,
+        values(uri) AS uris,
+        values(user_agent) AS user_agents,
+        values(status_code) AS status_codes
+    by id.orig_h, id.resp_h, id.resp_p, host, method
+| eval total_mb = round(total_upload/1048576, 2)
+| where total_mb &gt; 0.01
+| table id.orig_h, id.resp_h, id.resp_p, host, method,
+        total_mb, requests, uris, user_agents, status_codes
+| rename id.orig_h AS "Source", id.resp_h AS "Destination",
+         id.resp_p AS "Port", total_mb AS "Uploaded (MB)"
+| sort - "Uploaded (MB)"</query>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*http.log"+id.orig_h%3D"$row.Source|u$"+id.resp_h%3D"$row.Destination|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+    <panel>
+      <title>HTTP Upload Volume Over Time (http.log)</title>
+      <chart>
+        <search base="Base_Search">
+          <query>| search source="*http.log" $src_ip_include$ $src_ip_exclude$ $dst_port_exclude$
+| where NOT match(id.resp_h, "^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)")
+      AND (method="POST" OR method="PUT" OR method="PATCH")
+      AND request_body_len &gt; 0
+| timechart span=5m sum(request_body_len) AS "HTTP Upload Bytes"</query>
+        </search>
+        <option name="charting.chart">area</option>
+        <option name="charting.axisTitleX.text">Time</option>
+        <option name="charting.axisTitleY.text">Bytes Uploaded</option>
+        <option name="charting.chart.nullValueMode">zero</option>
+        <option name="charting.seriesColors">[0xd93f3c]</option>
+        <option name="charting.legend.placement">none</option>
+        <option name="charting.drilldown">all</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- ROW 7: FTP OUTBOUND TRANSFERS                                      -->
+  <!-- ─────────────────────────────────────────────────────────────────── -->
+  <!-- STOR = upload from client to server (exfil direction)              -->
+  <!-- RETR = download from server to client (less concerning but noted)  -->
+  <!-- External FTP with STOR is near-always worth reviewing.             -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <row>
+    <panel>
+      <title>FTP Outbound — STOR Transfers to External (ftp.log)</title>
+      <table>
+        <search base="Base_Search">
+          <query>| search source="*ftp.log" $src_ip_include$ $src_ip_exclude$
+    command=STOR
+| where NOT match(id.resp_h, "^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)")
+| eval size_kb = round(file_size/1024, 2)
+| stats sum(file_size) AS total_bytes,
+        count AS transfers,
+        values(arg) AS filenames,
+        values(user) AS users,
+        values(reply_code) AS reply_codes
+    by id.orig_h, id.resp_h
+| eval total_mb = round(total_bytes/1048576, 2)
+| table id.orig_h, id.resp_h, total_mb, transfers, filenames, users, reply_codes
+| rename id.orig_h AS "Source", id.resp_h AS "FTP Server",
+         total_mb AS "Uploaded (MB)", transfers AS "Files Transferred"
+| sort - "Uploaded (MB)"</query>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*ftp.log"+id.orig_h%3D"$row.Source|u$"+id.resp_h%3D"$row.FTP Server|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <!-- SMTP OUTBOUND ATTACHMENTS                                          -->
+    <!-- ─────────────────────────────────────────────────────────────────── -->
+    <!-- Outbound SMTP with fuids indicates email with attachments.         -->
+    <!-- fuids link to files.log where mime_type, size, and hashes are     -->
+    <!-- available. Large attachment volumes or sensitive mime types        -->
+    <!-- (application/zip, application/x-executable) are high signal.      -->
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <panel>
+      <title>SMTP Outbound with Attachments — External Recipients (smtp.log)</title>
+      <table>
+        <search base="Base_Search">
+          <query>| search source="*smtp.log" $src_ip_include$ $src_ip_exclude$
+| where NOT match(id.resp_h, "^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)")
+      AND mvcount(fuids) &gt; 0
+| eval attachment_count = mvcount(fuids)
+| stats count AS emails,
+        sum(attachment_count) AS total_attachments,
+        values(mailfrom) AS senders,
+        values(rcptto) AS recipients,
+        values(subject) AS subjects,
+        values(fuids) AS fuids
+    by id.orig_h, id.resp_h
+| table id.orig_h, id.resp_h, emails, total_attachments, senders, recipients, subjects, fuids
+| rename id.orig_h AS "Source", id.resp_h AS "SMTP Server",
+         emails AS "Emails", total_attachments AS "Attachments"
+| sort - "Attachments"</query>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*smtp.log"+id.orig_h%3D"$row.Source|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- ROW 8: DNS QUERY VOLUME — TUNNELLING SURFACE                       -->
+  <!-- ─────────────────────────────────────────────────────────────────── -->
+  <!-- DNS tunnelling encodes data in query labels. The volume of bytes   -->
+  <!-- embedded in queries is not directly visible in dns.log, but query  -->
+  <!-- length × query count gives a useful proxy for data volume.         -->
+  <!-- query_bytes_proxy = sum of all query string lengths per src/domain -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <row>
+    <panel>
+      <title>DNS Query Volume Proxy — Potential Tunnelling (dns.log)</title>
+      <table>
+        <search base="Base_Search">
+          <query>| search source="*dns.log" $src_ip_include$ $src_ip_exclude$
+    (qtype_name=A OR qtype_name=AAAA OR qtype_name=TXT OR qtype_name=NULL OR qtype_name=MX)
+| eval query_len   = len(query)
+| eval base_domain = replace(query, "^(?:[^.]+\.)+?([^.]+\.[^.]+)$", "\1")
+| stats count AS queries,
+        sum(query_len) AS query_bytes_proxy,
+        max(query_len) AS max_query_len,
+        dc(query) AS unique_subdomains,
+        values(qtype_name) AS qtypes
+    by id.orig_h, base_domain
+| where query_bytes_proxy &gt; 5000
+| eval proxy_kb = round(query_bytes_proxy/1024, 2)
+| eval tunnel_flag = case(
+    qtype_name="NULL",                                          "HIGH — NULL qtype",
+    max_query_len &gt; 100 AND unique_subdomains &gt; 20,       "HIGH — long+random labels",
+    max_query_len &gt; 50  AND queries &gt; 50,                 "MED  — long labels + volume",
+    unique_subdomains &gt; 30,                                  "MED  — many subdomains",
+    true(),                                                     "LOW  — review")
+| table id.orig_h, base_domain, queries, unique_subdomains, max_query_len,
+        proxy_kb, qtypes, tunnel_flag
+| rename id.orig_h AS "Source", base_domain AS "Base Domain",
+         queries AS "Query Count", unique_subdomains AS "Unique Subdomains",
+         max_query_len AS "Max Query Length", proxy_kb AS "Query Bytes Proxy (KB)",
+         tunnel_flag AS "Tunnel Confidence"
+| sort - "Query Bytes Proxy (KB)"</query>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*dns.log"+id.orig_h%3D"$row.Source|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <!-- ENCRYPTED CHANNEL BYTE VOLUMES                                     -->
+    <!-- ─────────────────────────────────────────────────────────────────── -->
+    <!-- ssl.log itself doesn't carry byte counts — those live in conn.log  -->
+    <!-- for the same uid. This panel joins ssl.log (for cert/SNI context)  -->
+    <!-- to conn.log (for bytes) via uid to give encrypted transfer volumes -->
+    <!-- with the server name visible, making cloud storage and C2 HTTPS    -->
+    <!-- exfil more identifiable than raw IP-only conn.log results.         -->
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <panel>
+      <title>TLS/SSL Encrypted Outbound — Bytes by Server Name (ssl.log + conn.log)</title>
+      <table>
+        <search base="Base_Search">
+          <query>| search source="*ssl.log" $src_ip_include$ $src_ip_exclude$
+| where NOT match(id.resp_h, "^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)")
+| table uid, id.orig_h, id.resp_h, id.resp_p, server_name, subject, issuer, version, cipher
+| join type=inner uid
+    [ search index=zeek source="*conn.log"
+      | where orig_bytes &gt; 0
+      | table uid, orig_bytes, resp_bytes, duration ]
+| eval out_mb = round(orig_bytes/1048576, 2)
+| eval in_mb  = round(resp_bytes/1048576, 2)
+| eval sni    = if(server_name!="", server_name, id.resp_h)
+| stats sum(orig_bytes) AS total_sent,
+        sum(resp_bytes) AS total_recv,
+        dc(id.orig_h) AS unique_senders,
+        count AS sessions
+    by sni, id.resp_h, id.resp_p
+| eval sent_mb = round(total_sent/1048576, 2)
+| eval recv_mb = round(total_recv/1048576, 2)
+| where sent_mb &gt; 0.1
+| table sni, id.resp_h, id.resp_p, sent_mb, recv_mb, sessions, unique_senders
+| rename sni AS "Server Name (SNI)", id.resp_h AS "Destination IP",
+         id.resp_p AS "Port", sent_mb AS "Sent (MB)", recv_mb AS "Recv (MB)",
+         sessions AS "TLS Sessions", unique_senders AS "Senders"
+| sort - "Sent (MB)"</query>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*ssl.log"+id.resp_h%3D"$row.Destination IP|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- ROW 9: SANKEY — SRC → DST → PORT WEIGHTED BY BYTES                -->
+  <!-- ─────────────────────────────────────────────────────────────────── -->
+  <!-- Standard Sankey but Count replaced by sum(orig_bytes) so the flow  -->
+  <!-- widths represent actual data volume rather than connection count.   -->
+  <!-- This makes bulk transfer paths immediately visually dominant.      -->
+  <!-- Limited to top 500 flows by bytes to keep render performance sane. -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <row>
+    <panel>
+      <viz type="sankey_diagram_app.sankey_diagram">
+        <title>Outbound Flow Map — Src → Dst → Port (weighted by bytes sent) (conn.log)</title>
+        <search base="Base_Search">
+          <query>| search source="*conn.log" $src_ip_include$ $src_ip_exclude$ $dst_port_exclude$
+| where NOT match(id.resp_h, "^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)")
+      AND orig_bytes &gt; 0
+      AND (id.orig_h!="f*" AND id.resp_h!="f*")
+| stats sum(orig_bytes) AS bytes BY id.orig_h, id.resp_h
+| rename id.orig_h AS Source, id.resp_h AS Target
+| append
+    [ search index=zeek source="*conn.log" $src_ip_include$ $src_ip_exclude$ $dst_port_exclude$
+    | where NOT match(id.resp_h, "^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)")
+          AND orig_bytes &gt; 0
+          AND (id.orig_h!="f*" AND id.resp_h!="f*")
+    | stats sum(orig_bytes) AS bytes BY id.resp_h, id.resp_p
+    | rename id.resp_h AS Source, id.resp_p AS Target ]
+| stats sum(bytes) AS Count BY Source, Target
+| sort - Count
+| head 500</query>
+        </search>
+        <option name="drilldown">all</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="sankey_diagram_app.sankey_diagram.colorMode">categorical</option>
+        <option name="sankey_diagram_app.sankey_diagram.maxColor">#3fc77a</option>
+        <option name="sankey_diagram_app.sankey_diagram.minColor">#d93f3c</option>
+        <option name="sankey_diagram_app.sankey_diagram.numOfBins">6</option>
+        <option name="sankey_diagram_app.sankey_diagram.showBackwards">false</option>
+        <option name="sankey_diagram_app.sankey_diagram.showLabels">true</option>
+        <option name="sankey_diagram_app.sankey_diagram.showLegend">true</option>
+        <option name="sankey_diagram_app.sankey_diagram.showSelf">false</option>
+        <option name="sankey_diagram_app.sankey_diagram.showTooltip">true</option>
+        <option name="sankey_diagram_app.sankey_diagram.styleBackwards">false</option>
+        <option name="sankey_diagram_app.sankey_diagram.useColors">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*conn.log"+($click.value|u$)</link>
+        </drilldown>
+      </viz>
+    </panel>
+  </row>
+
+</form>
