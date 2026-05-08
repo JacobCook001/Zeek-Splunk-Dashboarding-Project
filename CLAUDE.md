@@ -4,13 +4,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a **Splunk dashboard collection** for Zeek (NSM) network security monitoring, focused on lateral movement detection, exfiltration hunting, and incident response. Dashboards are written in Splunk's XML format (stored as `.txt` files) or HTML.
+This is a **Splunk dashboard and alert collection** for Zeek (NSM) network security monitoring, focused on lateral movement detection, exfiltration hunting, and incident response. Dashboards are written in Splunk's XML format (stored as `.txt` files) or HTML. Scheduled alerts are defined in `savedsearches.conf`.
 
 ## Deployment
 
 There are no build or test commands. Dashboards are imported directly into a Splunk instance via the GUI or REST API. All dashboards query `index=zeek`.
 
 **Required Splunk app dependency**: Sankey Diagram visualization app (used by `Cookie Sankey.txt`).
+
+**Alerts deployment**: copy `savedsearches.conf` to `$SPLUNK_HOME/etc/apps/<your_app>/default/savedsearches.conf` and restart Splunk (or `splunk reload deploy-server`). No token substitution — all alert SPL is standalone.
 
 ## Data Sources
 
@@ -78,3 +80,18 @@ Tokens are passed as `$token_name$` in SPL. A known limitation: Splunk tokenizes
 | `Jack 02.txt` | Multi-source composite view |
 
 High-value named pipes to monitor: `svcctl` (service control), `samr` (SAM enumeration), `lsarpc` (LSA), `atsvc` (task scheduler), `winreg` (registry), `drsuapi` (DCSync/credential dump).
+
+## Scheduled Alerts (`savedsearches.conf`)
+
+31 alerts across three severity tiers. All query `index=zeek` with no token substitution.
+
+| Severity | Count | Schedule | Alerts |
+|---|---|---|---|
+| **Critical (5)** | 6 | every 5–15m | Intel indicator match, BZAR lateral movement notice, Kerberoasting (T1558.003), Golden/Silver ticket anomalous lifetime (T1558.001), RDP inbound from external (T1021.001), DCE-RPC high-value named pipes (T1021.006) |
+| **High (4)** | 13 | every 15m or 1h | AS-REP roasting (T1558.004), TGS without prior AS-REQ, SMB executable transfer, SMB admin share access (T1021.002), NTLM relay (T1550.002), NTLM-only/no-Kerberos PTH indicator, RDP lateral movement internal-to-internal, internal scanning (T1046), FTP STOR exfil (T1048), large outbound >50 MB (T1041), TLS no-SNI established session, self-signed cert on external server (T1573), inbound external scanning (T1595) |
+| **Medium (3)** | 12 | every 15m or 1h | Kerberos/NTLM/SMB/RDP brute force (T1110), RDP spray, DNS NXDOMAIN rate DGA (T1071.004), DNS long query strings tunneling, HTTP large upload >10 MB (T1041), port sweep (T1046), host sweep (T1595), deprecated TLS version (T1573), beaconing low-jitter periodic callback with 6h window (T1071) |
+
+**Alert tuning notes:**
+- Brute force thresholds (failures > 5/10) should be adjusted to match your environment's baseline noise.
+- The beaconing alert uses a 6-hour dispatch window and runs hourly — it needs sufficient history to compute meaningful interval statistics.
+- `jitter_pct < 10` in the beaconing alert is intentionally tight; raise to 15–20 to surface more candidates at the cost of false positives.
