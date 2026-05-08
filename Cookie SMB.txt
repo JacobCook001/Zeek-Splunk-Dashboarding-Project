@@ -384,22 +384,24 @@
   </row>
   <row>
     <panel>
+      <title>SMB Activity Summary - Name, Path, Share Type by Source</title>
       <table>
         <search>
           <query>index=zeek source="*smb*" $src_ip_include$ $src_ip_exclude$
-| search $smb_name_include$ $smb_name_exclude$ $smb_path_include$ $smb_path_exclude$ | table name path share_type id.orig_h</query>
+| search $smb_name_include$ $smb_name_exclude$ $smb_path_include$ $smb_path_exclude$
+| stats count by id.orig_h, name, path, share_type
+| sort - count
+| head 500</query>
           <earliest>$time_range.earliest$</earliest>
           <latest>$time_range.latest$</latest>
-          <sampleRatio>1</sampleRatio>
         </search>
         <option name="count">20</option>
-        <option name="dataOverlayMode">none</option>
         <option name="drilldown">cell</option>
-        <option name="percentagesRow">false</option>
         <option name="refresh.display">progressbar</option>
-        <option name="rowNumbers">false</option>
-        <option name="totalsRow">false</option>
         <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*smb*"+id.orig_h%3D"$row.id.orig_h|u$"</link>
+        </drilldown>
       </table>
     </panel>
   </row>

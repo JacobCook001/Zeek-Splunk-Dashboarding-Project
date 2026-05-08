@@ -91,7 +91,7 @@
           <query>index=zeek source="*kerberos.log" $src_ip_include$ $src_ip_exclude$
 | search request_type=TGS cipher=rc4-hmac
 | where match(service, "\/")
-| stats count, values(uid) AS uids by id.orig_h, id.resp_h, client, service, cipher
+| stats count by id.orig_h, id.resp_h, client, service, cipher
 | sort - count</query>
           <earliest>$time_range.earliest$</earliest>
           <latest>$time_range.latest$</latest>
@@ -229,7 +229,8 @@
         <search>
           <query>index=zeek source="*kerberos.log" $src_ip_include$ $src_ip_exclude$
 | where isnotnull(till) AND till!=""
-| eval till_epoch=strptime(till, "%Y-%m-%dT%H:%M:%S")
+| eval till_clean=replace(till, "\.\d+$", "")
+| eval till_epoch=strptime(till_clean, "%Y-%m-%dT%H:%M:%S")
 | eval till_days=round((till_epoch - now()) / 86400, 1)
 | where till_days > 30 OR till_days < 0
 | stats count by id.orig_h, id.resp_h, client, service, request_type, cipher, till, till_days, uid
