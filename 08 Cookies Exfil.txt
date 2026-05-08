@@ -24,7 +24,7 @@
   <!-- ═══════════════════════════════════════════════════════════════════ -->
 
   <search id="Base_Search">
-    <query>index=zeek | fields *</query>
+    <query>index=zeek source="*conn.log"</query>
     <earliest>$time_range.earliest$</earliest>
     <latest>$time_range.latest$</latest>
   </search>
@@ -421,8 +421,8 @@
     <panel>
       <title>HTTP Uploads — POST/PUT with Body Data to External (http.log)</title>
       <table>
-        <search base="Base_Search">
-          <query>| search source="*http.log" $src_ip_include$ $src_ip_exclude$ $dst_port_exclude$
+        <search>
+          <query>index=zeek source="*http.log" $src_ip_include$ $src_ip_exclude$ $dst_port_exclude$
 | where NOT match(id.resp_h, "^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)")
       AND (method="POST" OR method="PUT" OR method="PATCH")
       AND request_body_len &gt; 0
@@ -440,6 +440,8 @@
 | rename id.orig_h AS "Source", id.resp_h AS "Destination",
          id.resp_p AS "Port", total_mb AS "Uploaded (MB)"
 | sort - "Uploaded (MB)"</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
         </search>
         <option name="count">20</option>
         <option name="drilldown">cell</option>
@@ -453,12 +455,14 @@
     <panel>
       <title>HTTP Upload Volume Over Time (http.log)</title>
       <chart>
-        <search base="Base_Search">
-          <query>| search source="*http.log" $src_ip_include$ $src_ip_exclude$ $dst_port_exclude$
+        <search>
+          <query>index=zeek source="*http.log" $src_ip_include$ $src_ip_exclude$ $dst_port_exclude$
 | where NOT match(id.resp_h, "^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)")
       AND (method="POST" OR method="PUT" OR method="PATCH")
       AND request_body_len &gt; 0
 | timechart span=5m sum(request_body_len) AS "HTTP Upload Bytes"</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
         </search>
         <option name="charting.chart">area</option>
         <option name="charting.axisTitleX.text">Time</option>
@@ -483,8 +487,10 @@
     <panel>
       <title>FTP Outbound — STOR Transfers to External (ftp.log)</title>
       <table>
-        <search base="Base_Search">
-          <query>| search source="*ftp.log" $src_ip_include$ $src_ip_exclude$
+        <search>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+          <query>index=zeek source="*ftp.log" $src_ip_include$ $src_ip_exclude$
     command=STOR
 | where NOT match(id.resp_h, "^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)")
 | eval size_kb = round(file_size/1024, 2)
@@ -520,8 +526,10 @@
     <panel>
       <title>SMTP Outbound with Attachments — External Recipients (smtp.log)</title>
       <table>
-        <search base="Base_Search">
-          <query>| search source="*smtp.log" $src_ip_include$ $src_ip_exclude$
+        <search>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+          <query>index=zeek source="*smtp.log" $src_ip_include$ $src_ip_exclude$
 | where NOT match(id.resp_h, "^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)")
       AND mvcount(fuids) &gt; 0
 | eval attachment_count = mvcount(fuids)
@@ -560,8 +568,10 @@
     <panel>
       <title>DNS Query Volume Proxy — Potential Tunnelling (dns.log)</title>
       <table>
-        <search base="Base_Search">
-          <query>| search source="*dns.log" $src_ip_include$ $src_ip_exclude$
+        <search>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+          <query>index=zeek source="*dns.log" $src_ip_include$ $src_ip_exclude$
     (qtype_name=A OR qtype_name=AAAA OR qtype_name=TXT OR qtype_name=NULL OR qtype_name=MX)
 | eval query_len   = len(query)
 | eval base_domain = replace(query, "^(?:[^.]+\.)+?([^.]+\.[^.]+)$", "\1")
@@ -608,24 +618,22 @@
     <panel>
       <title>TLS/SSL Encrypted Outbound — Bytes by Server Name (ssl.log + conn.log)</title>
       <table>
-        <search base="Base_Search">
-          <query>| search source="*ssl.log" $src_ip_include$ $src_ip_exclude$
+        <search>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+          <query>index=zeek (source="*ssl.log" OR source="*conn.log") $src_ip_include$ $src_ip_exclude$
 | where NOT match(id.resp_h, "^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)")
-| table uid, id.orig_h, id.resp_h, id.resp_p, server_name, subject, issuer, version, cipher
-| join type=inner uid
-    [ search index=zeek source="*conn.log"
-      | where orig_bytes &gt; 0
-      | table uid, orig_bytes, resp_bytes, duration ]
-| eval out_mb = round(orig_bytes/1048576, 2)
-| eval in_mb  = round(resp_bytes/1048576, 2)
-| eval sni    = if(server_name!="", server_name, id.resp_h)
-| stats sum(orig_bytes) AS total_sent,
-        sum(resp_bytes) AS total_recv,
-        dc(id.orig_h) AS unique_senders,
-        count AS sessions
+| stats values(server_name) AS server_name,
+        sum(orig_bytes) AS total_sent,
+        sum(resp_bytes) AS total_recv
+    by uid, id.orig_h, id.resp_h, id.resp_p
+| where isnotnull(server_name) AND server_name!=""
+| eval sni=mvindex(server_name, 0)
+| stats sum(total_sent) AS total_sent, sum(total_recv) AS total_recv,
+        dc(id.orig_h) AS unique_senders, count AS sessions
     by sni, id.resp_h, id.resp_p
-| eval sent_mb = round(total_sent/1048576, 2)
-| eval recv_mb = round(total_recv/1048576, 2)
+| eval sent_mb=round(total_sent/1048576, 2)
+| eval recv_mb=round(total_recv/1048576, 2)
 | where sent_mb &gt; 0.1
 | table sni, id.resp_h, id.resp_p, sent_mb, recv_mb, sessions, unique_senders
 | rename sni AS "Server Name (SNI)", id.resp_h AS "Destination IP",
@@ -661,16 +669,14 @@
 | where NOT match(id.resp_h, "^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)")
       AND orig_bytes &gt; 0
       AND (id.orig_h!="f*" AND id.resp_h!="f*")
-| stats sum(orig_bytes) AS bytes BY id.orig_h, id.resp_h
-| rename id.orig_h AS Source, id.resp_h AS Target
-| append
-    [ search index=zeek source="*conn.log" $src_ip_include$ $src_ip_exclude$ $dst_port_exclude$
-    | where NOT match(id.resp_h, "^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)")
-          AND orig_bytes &gt; 0
-          AND (id.orig_h!="f*" AND id.resp_h!="f*")
-    | stats sum(orig_bytes) AS bytes BY id.resp_h, id.resp_p
+| stats sum(orig_bytes) AS bytes BY id.orig_h, id.resp_h, id.resp_p
+| appendpipe
+    [ stats sum(bytes) AS Count BY id.resp_h, id.resp_p
     | rename id.resp_h AS Source, id.resp_p AS Target ]
-| stats sum(bytes) AS Count BY Source, Target
+| eval Source=coalesce(Source, id.orig_h)
+| eval Target=coalesce(Target, id.resp_h)
+| eval Count=coalesce(Count, bytes)
+| stats sum(Count) AS Count BY Source, Target
 | sort - Count
 | head 500</query>
         </search>

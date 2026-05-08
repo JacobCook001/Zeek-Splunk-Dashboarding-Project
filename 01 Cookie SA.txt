@@ -292,12 +292,15 @@
       <table>
         <search base="Base_Search">
           <query>| search $src_ip_include$ $src_ip_exclude$ (id.resp_p=443 OR id.resp_p=80 OR id.resp_p=8080)
-| transaction id.orig_h, id.resp_h maxpause=15m
-| eval interval = duration
-| stats avg(interval) as avg_interval_sec, count as sessions by id.orig_h, id.resp_h
-| eval avg_interval_sec = round(avg_interval_sec, 2)
-| where sessions &gt; 3
-| sort - sessions</query>
+| sort 0 _time
+| streamstats current=f last(_time) AS prev_time BY id.orig_h, id.resp_h
+| eval interval_sec=_time - prev_time
+| where interval_sec > 0 AND interval_sec < 900
+| stats avg(interval_sec) AS avg_interval_sec, stdev(interval_sec) AS stdev_interval_sec, count AS connections by id.orig_h, id.resp_h
+| eval avg_interval_sec=round(avg_interval_sec, 2)
+| eval stdev_interval_sec=round(stdev_interval_sec, 2)
+| where connections > 3
+| sort avg_interval_sec</query>
         </search>
         <option name="count">20</option>
         <option name="drilldown">cell</option>
