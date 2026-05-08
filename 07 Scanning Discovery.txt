@@ -1,0 +1,327 @@
+<form version="1.1" theme="light">
+  <label>07 - Network Scanning &amp; Discovery</label>
+  <fieldset submitButton="true" autoRun="true">
+    <input type="time" token="time_range" searchWhenChanged="false">
+      <label>Time Range</label>
+      <default>
+        <earliest>-24h@h</earliest>
+        <latest>now</latest>
+      </default>
+    </input>
+    <input type="multiselect" token="src_ip_include" searchWhenChanged="false">
+      <label>Source IP - Include</label>
+      <choice value="*">All</choice>
+      <fieldForLabel>id.orig_h</fieldForLabel>
+      <fieldForValue>id.orig_h</fieldForValue>
+      <search>
+        <query>index=zeek source="*conn.log" | dedup id.orig_h | sort id.orig_h | table id.orig_h</query>
+        <earliest>$time_range.earliest$</earliest>
+        <latest>$time_range.latest$</latest>
+      </search>
+      <default>*</default>
+      <initialValue>*</initialValue>
+      <valuePrefix>id.orig_h="</valuePrefix>
+      <valueSuffix>"</valueSuffix>
+      <delimiter> OR </delimiter>
+      <prefix>(</prefix>
+      <suffix>)</suffix>
+    </input>
+    <input type="multiselect" token="src_ip_exclude" searchWhenChanged="false">
+      <label>Source IP - Exclude</label>
+      <choice value="__none__">None</choice>
+      <fieldForLabel>id.orig_h</fieldForLabel>
+      <fieldForValue>id.orig_h</fieldForValue>
+      <search>
+        <query>index=zeek source="*conn.log" | dedup id.orig_h | sort id.orig_h | table id.orig_h</query>
+        <earliest>$time_range.earliest$</earliest>
+        <latest>$time_range.latest$</latest>
+      </search>
+      <default>__none__</default>
+      <initialValue>__none__</initialValue>
+      <valuePrefix>id.orig_h!="</valuePrefix>
+      <valueSuffix>"</valueSuffix>
+      <delimiter> AND </delimiter>
+      <prefix>(</prefix>
+      <suffix>)</suffix>
+    </input>
+  </fieldset>
+
+  <!-- ── ROW 1: Connection state overview ── -->
+  <row>
+    <panel>
+      <!-- S0=SYN no response (stealth scan), REJ=RST received, S1/SF=established.
+           High S0 or REJ volume from a single source = active scanner. -->
+      <title>Connection State Distribution</title>
+      <chart>
+        <search>
+          <query>index=zeek source="*conn.log" $src_ip_include$ $src_ip_exclude$
+| stats count by conn_state
+| sort - count</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="charting.chart">bar</option>
+        <option name="charting.drilldown">all</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Scan Activity Over Time (S0 + REJ connections)</title>
+      <chart>
+        <search>
+          <query>index=zeek source="*conn.log" $src_ip_include$ $src_ip_exclude$
+| search conn_state=S0 OR conn_state=REJ
+| timechart span=5m count by conn_state</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">all</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+
+  <!-- ── ROW 2: SYN scan candidates ── -->
+  <row>
+    <panel>
+      <!-- S0 = SYN sent, no SYN-ACK received. Volume of S0 per source is the
+           primary indicator of a stealth port scanner (nmap -sS style). T1046 -->
+      <title>SYN Scan Candidates - High S0 Volume (&gt;50) (T1046)</title>
+      <table>
+        <search>
+          <query>index=zeek source="*conn.log" $src_ip_include$ $src_ip_exclude$
+| search conn_state=S0
+| stats count AS syn_probes, dc(id.resp_h) AS unique_hosts, dc(id.resp_p) AS unique_ports by id.orig_h
+| where syn_probes > 50
+| sort - syn_probes</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*conn.log"+id.orig_h%3D"$row.id.orig_h|u$"+conn_state%3DS0</link>
+        </drilldown>
+      </table>
+    </panel>
+    <panel>
+      <!-- REJ = RST received immediately. High REJ count means the host is sending
+           probes to closed ports — a connect() or banner-grab scan. -->
+      <title>Connect Scan Candidates - High REJ Volume (&gt;20)</title>
+      <table>
+        <search>
+          <query>index=zeek source="*conn.log" $src_ip_include$ $src_ip_exclude$
+| search conn_state=REJ
+| stats count AS rejected, dc(id.resp_h) AS unique_hosts, dc(id.resp_p) AS unique_ports by id.orig_h
+| where rejected > 20
+| sort - rejected</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*conn.log"+id.orig_h%3D"$row.id.orig_h|u$"+conn_state%3DREJ</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+
+  <!-- ── ROW 3: Port sweep & host sweep ── -->
+  <row>
+    <panel>
+      <!-- Port sweep: one source scanning many ports on few hosts.
+           Attacker profiling services on a target. T1046 -->
+      <title>Port Sweep - Many Ports, Few Hosts (&gt;20 ports, &lt;5 hosts) (T1046)</title>
+      <table>
+        <search>
+          <query>index=zeek source="*conn.log" $src_ip_include$ $src_ip_exclude$
+| stats dc(id.resp_p) AS unique_ports, dc(id.resp_h) AS unique_hosts, count AS connections by id.orig_h
+| where unique_ports > 20 AND unique_hosts < 5
+| sort - unique_ports</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*conn.log"+id.orig_h%3D"$row.id.orig_h|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+    <panel>
+      <!-- Host sweep: one source hitting many hosts on the same port.
+           Attacker discovering live hosts or a specific service network-wide. T1595 -->
+      <title>Host Sweep - Many Hosts, Single Port (&gt;20 hosts) (T1595)</title>
+      <table>
+        <search>
+          <query>index=zeek source="*conn.log" $src_ip_include$ $src_ip_exclude$
+| stats dc(id.resp_h) AS unique_hosts, count AS connections by id.orig_h, id.resp_p
+| where unique_hosts > 20
+| sort - unique_hosts</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*conn.log"+id.orig_h%3D"$row.id.orig_h|u$"+id.resp_p%3D"$row.id.resp_p|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+
+  <!-- ── ROW 4: Internal vs external scanning ── -->
+  <row>
+    <panel>
+      <!-- Internal → internal scanning indicates post-compromise lateral recon.
+           An attacker who has a foothold will scan the internal network. -->
+      <title>Internal Scanning - RFC1918 Source to RFC1918 Targets</title>
+      <table>
+        <search>
+          <query>index=zeek source="*conn.log" $src_ip_include$ $src_ip_exclude$
+| where match(id.orig_h, "^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)")
+  AND match(id.resp_h, "^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)")
+  AND (conn_state=S0 OR conn_state=REJ)
+| stats count AS probes, dc(id.resp_h) AS unique_hosts, dc(id.resp_p) AS unique_ports by id.orig_h
+| where probes > 10
+| sort - probes</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*conn.log"+id.orig_h%3D"$row.id.orig_h|u$"+conn_state%3DS0</link>
+        </drilldown>
+      </table>
+    </panel>
+    <panel>
+      <!-- External → internal scanning: inbound recon from the internet.
+           Could be opportunistic scanners or targeted attacker reconnaissance. T1595 -->
+      <title>Inbound External Scanning (Non-RFC1918 → Internal)</title>
+      <table>
+        <search>
+          <query>index=zeek source="*conn.log" $src_ip_include$ $src_ip_exclude$
+| where NOT match(id.orig_h, "^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)")
+  AND match(id.resp_h, "^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)")
+  AND (conn_state=S0 OR conn_state=REJ)
+| stats count AS probes, dc(id.resp_h) AS unique_hosts, dc(id.resp_p) AS unique_ports by id.orig_h
+| where probes > 5
+| sort - probes</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*conn.log"+id.orig_h%3D"$row.id.orig_h|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+
+  <!-- ── ROW 5: Top scanned ports & zero-byte probes ── -->
+  <row>
+    <panel>
+      <title>Top Scanned Destination Ports (S0 + REJ)</title>
+      <chart>
+        <search>
+          <query>index=zeek source="*conn.log" $src_ip_include$ $src_ip_exclude$
+| search conn_state=S0 OR conn_state=REJ
+| top limit=20 id.resp_p</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="charting.chart">bar</option>
+        <option name="charting.drilldown">all</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <!-- Zero-byte connections with no data exchanged are probes or knocks.
+           Attackers use these to map open ports without triggering IDS byte thresholds. -->
+      <title>Zero-Byte Connections - Port Probe / Knock</title>
+      <table>
+        <search>
+          <query>index=zeek source="*conn.log" $src_ip_include$ $src_ip_exclude$
+| where orig_bytes=0 AND resp_bytes=0 AND conn_state!=S0
+| stats count AS probes, dc(id.resp_h) AS unique_hosts, dc(id.resp_p) AS unique_ports by id.orig_h
+| where probes > 10
+| sort - probes</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*conn.log"+id.orig_h%3D"$row.id.orig_h|u$"+orig_bytes%3D0+resp_bytes%3D0</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+
+  <!-- ── ROW 6: Top scanning sources & summary ── -->
+  <row>
+    <panel>
+      <title>Top Scanning Sources by Unique Destination Count</title>
+      <table>
+        <search>
+          <query>index=zeek source="*conn.log" $src_ip_include$ $src_ip_exclude$
+| stats dc(id.resp_h) AS unique_hosts, dc(id.resp_p) AS unique_ports, count AS connections,
+        sum(if(conn_state="S0",1,0)) AS s0_count,
+        sum(if(conn_state="REJ",1,0)) AS rej_count
+    by id.orig_h
+| where unique_hosts > 10 OR unique_ports > 15
+| sort - unique_hosts</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*conn.log"+id.orig_h%3D"$row.id.orig_h|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+    <panel>
+      <title>Top Scanned Internal Hosts (Most Targeted)</title>
+      <table>
+        <search>
+          <query>index=zeek source="*conn.log" $src_ip_include$ $src_ip_exclude$
+| where match(id.resp_h, "^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)")
+  AND (conn_state=S0 OR conn_state=REJ)
+| stats count AS probes, dc(id.orig_h) AS unique_scanners, dc(id.resp_p) AS unique_ports by id.resp_h
+| sort - probes</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*conn.log"+id.resp_h%3D"$row.id.resp_h|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+
+</form>

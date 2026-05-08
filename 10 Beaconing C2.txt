@@ -1,0 +1,292 @@
+<form version="1.1" theme="light">
+  <label>10 - Beaconing &amp; C2 Callback Detection</label>
+  <fieldset submitButton="true" autoRun="true">
+    <input type="time" token="time_range" searchWhenChanged="false">
+      <label>Time Range</label>
+      <default>
+        <earliest>-24h@h</earliest>
+        <latest>now</latest>
+      </default>
+    </input>
+    <input type="multiselect" token="src_ip_include" searchWhenChanged="false">
+      <label>Source IP - Include</label>
+      <choice value="*">All</choice>
+      <fieldForLabel>id.orig_h</fieldForLabel>
+      <fieldForValue>id.orig_h</fieldForValue>
+      <search>
+        <query>index=zeek source="*conn.log" | dedup id.orig_h | sort id.orig_h | table id.orig_h</query>
+        <earliest>$time_range.earliest$</earliest>
+        <latest>$time_range.latest$</latest>
+      </search>
+      <default>*</default>
+      <initialValue>*</initialValue>
+      <valuePrefix>id.orig_h="</valuePrefix>
+      <valueSuffix>"</valueSuffix>
+      <delimiter> OR </delimiter>
+      <prefix>(</prefix>
+      <suffix>)</suffix>
+    </input>
+    <input type="multiselect" token="src_ip_exclude" searchWhenChanged="false">
+      <label>Source IP - Exclude</label>
+      <choice value="__none__">None</choice>
+      <fieldForLabel>id.orig_h</fieldForLabel>
+      <fieldForValue>id.orig_h</fieldForValue>
+      <search>
+        <query>index=zeek source="*conn.log" | dedup id.orig_h | sort id.orig_h | table id.orig_h</query>
+        <earliest>$time_range.earliest$</earliest>
+        <latest>$time_range.latest$</latest>
+      </search>
+      <default>__none__</default>
+      <initialValue>__none__</initialValue>
+      <valuePrefix>id.orig_h!="</valuePrefix>
+      <valueSuffix>"</valueSuffix>
+      <delimiter> AND </delimiter>
+      <prefix>(</prefix>
+      <suffix>)</suffix>
+    </input>
+  </fieldset>
+
+  <!-- ── ROW 1: Beaconing candidates (all ports) ── -->
+  <row>
+    <panel>
+      <!-- Beaconing detection via streamstats interval delta.
+           Low jitter_pct (stdev/avg < 15%) = highly regular callback = strong beacon signal.
+           Covers all ports — C2 is not limited to 80/443. T1071, T1572 -->
+      <title>Beaconing Candidates - Low Jitter Periodic Callbacks (All Ports) (T1071)</title>
+      <table>
+        <search>
+          <query>index=zeek source="*conn.log" $src_ip_include$ $src_ip_exclude$
+| where NOT match(id.resp_h, "^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)")
+| sort 0 id.orig_h, id.resp_h, id.resp_p, _time
+| streamstats current=f last(_time) AS prev_time BY id.orig_h, id.resp_h, id.resp_p
+| eval interval_sec=_time - prev_time
+| where interval_sec > 0 AND interval_sec < 3600
+| stats avg(interval_sec) AS avg_interval_sec, stdev(interval_sec) AS stdev_interval_sec,
+        count AS connections, sum(orig_bytes) AS total_bytes
+    by id.orig_h, id.resp_h, id.resp_p
+| where connections > 5
+| eval jitter_pct=round(stdev_interval_sec / avg_interval_sec * 100, 1)
+| where jitter_pct < 15
+| eval avg_interval_sec=round(avg_interval_sec, 1)
+| eval stdev_interval_sec=round(stdev_interval_sec, 1)
+| eval total_kb=round(total_bytes/1024, 1)
+| table id.orig_h, id.resp_h, id.resp_p, avg_interval_sec, stdev_interval_sec, jitter_pct, connections, total_kb
+| rename id.orig_h AS "Source", id.resp_h AS "Destination", id.resp_p AS "Port",
+         avg_interval_sec AS "Avg Interval (s)", stdev_interval_sec AS "Stdev (s)",
+         jitter_pct AS "Jitter %", connections AS "Connections", total_kb AS "Total KB"
+| sort "Jitter %"</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*conn.log"+id.orig_h%3D"$row.Source|u$"+id.resp_h%3D"$row.Destination|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+
+  <!-- ── ROW 2: Long duration & low-volume high-frequency ── -->
+  <row>
+    <panel>
+      <!-- Persistent long-duration connections are common in C2 frameworks that
+           keep an interactive session open rather than polling. T1071 -->
+      <title>Long Duration Connections (&gt;1hr) - Persistent C2 Session</title>
+      <table>
+        <search>
+          <query>index=zeek source="*conn.log" $src_ip_include$ $src_ip_exclude$
+| where NOT match(id.resp_h, "^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)")
+  AND duration > 3600
+| eval duration_hrs=round(duration/3600, 2)
+| eval out_kb=round(orig_bytes/1024, 1)
+| eval in_kb=round(resp_bytes/1024, 1)
+| table _time, id.orig_h, id.resp_h, id.resp_p, proto, service, duration_hrs, out_kb, in_kb, conn_state, uid
+| rename id.orig_h AS "Source", id.resp_h AS "Destination", id.resp_p AS "Port",
+         duration_hrs AS "Duration (hrs)", out_kb AS "Sent (KB)", in_kb AS "Recv (KB)",
+         conn_state AS "State"
+| sort - "Duration (hrs)"</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*conn.log"+uid%3D"$row.uid|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+    <panel>
+      <!-- High frequency + low bytes per connection = heartbeat pattern.
+           C2 agents polling for tasks send small fixed-size requests repeatedly. -->
+      <title>High-Frequency Low-Volume Connections - Heartbeat Pattern</title>
+      <table>
+        <search>
+          <query>index=zeek source="*conn.log" $src_ip_include$ $src_ip_exclude$
+| where NOT match(id.resp_h, "^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)")
+| stats count AS connections, avg(orig_bytes) AS avg_bytes_per_conn,
+        sum(orig_bytes) AS total_bytes, values(service) AS services
+    by id.orig_h, id.resp_h, id.resp_p
+| where connections > 20 AND avg_bytes_per_conn < 1024
+| eval avg_bytes_per_conn=round(avg_bytes_per_conn, 0)
+| eval total_kb=round(total_bytes/1024, 1)
+| sort - connections</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*conn.log"+id.orig_h%3D"$row.id.orig_h|u$"+id.resp_h%3D"$row.id.resp_h|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+
+  <!-- ── ROW 3: Consistent payload size & uncommon ports ── -->
+  <row>
+    <panel>
+      <!-- C2 agents often send fixed-size payloads (task poll request, keepalive).
+           Very low byte stdev across many connections is a strong structural beacon signal. -->
+      <title>Consistent Payload Size - Fixed-Size C2 Heartbeat</title>
+      <table>
+        <search>
+          <query>index=zeek source="*conn.log" $src_ip_include$ $src_ip_exclude$
+| where NOT match(id.resp_h, "^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)")
+  AND orig_bytes > 0
+| stats count AS connections, avg(orig_bytes) AS avg_bytes, stdev(orig_bytes) AS bytes_stdev by id.orig_h, id.resp_h, id.resp_p
+| where connections > 10 AND bytes_stdev < 10
+| eval avg_bytes=round(avg_bytes, 0)
+| eval bytes_stdev=round(bytes_stdev, 2)
+| sort - connections</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*conn.log"+id.orig_h%3D"$row.id.orig_h|u$"+id.resp_h%3D"$row.id.resp_h|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+    <panel>
+      <!-- Legitimate applications rarely use non-standard high ports for C2.
+           Repeated external connections on uncommon ports warrant investigation. T1571 -->
+      <title>Repeated External Connections on Uncommon Ports (T1571)</title>
+      <table>
+        <search>
+          <query>index=zeek source="*conn.log" $src_ip_include$ $src_ip_exclude$
+| where NOT match(id.resp_h, "^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)")
+  AND id.resp_p!=80 AND id.resp_p!=443 AND id.resp_p!=53 AND id.resp_p!=22 AND id.resp_p!=25
+  AND id.resp_p!=8080 AND id.resp_p!=8443
+| stats count AS connections, dc(id.resp_h) AS unique_dsts, values(service) AS services by id.orig_h, id.resp_p
+| where connections > 5
+| sort - connections</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*conn.log"+id.orig_h%3D"$row.id.orig_h|u$"+id.resp_p%3D"$row.id.resp_p|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+
+  <!-- ── ROW 4: Off-hours & new destination detection ── -->
+  <row>
+    <panel>
+      <!-- C2 callbacks at unusual hours (nights, weekends) are lower noise
+           and can evade human monitoring. Alert on external connections outside 07-19. -->
+      <title>Off-Hours External Connections (before 07:00 or after 19:00)</title>
+      <table>
+        <search>
+          <query>index=zeek source="*conn.log" $src_ip_include$ $src_ip_exclude$
+| where NOT match(id.resp_h, "^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)")
+  AND orig_bytes > 0
+| eval hour=tonumber(strftime(_time, "%H"))
+| where hour < 7 OR hour > 19
+| stats count AS connections, sum(orig_bytes) AS total_bytes, dc(id.resp_h) AS unique_dsts by id.orig_h, hour
+| eval total_kb=round(total_bytes/1024, 1)
+| sort - connections</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*conn.log"+id.orig_h%3D"$row.id.orig_h|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+    <panel>
+      <!-- First-seen external destinations in the time window that haven't been
+           contacted before. New C2 infrastructure shows up here before OSINT catches it. -->
+      <title>First-Seen External Destinations in Window (Rare Outbound)</title>
+      <table>
+        <search>
+          <query>index=zeek source="*conn.log" $src_ip_include$ $src_ip_exclude$
+| where NOT match(id.resp_h, "^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)")
+  AND orig_bytes > 0
+| stats count AS connections, dc(id.orig_h) AS unique_senders, min(_time) AS first_seen, sum(orig_bytes) AS total_bytes by id.resp_h
+| where unique_senders < 3 AND connections < 10
+| eval first_seen=strftime(first_seen, "%Y-%m-%dT%H:%M:%S")
+| eval total_kb=round(total_bytes/1024, 1)
+| sort first_seen</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*conn.log"+id.resp_h%3D"$row.id.resp_h|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+
+  <!-- ── ROW 5: Summary ── -->
+  <row>
+    <panel>
+      <title>External Connection Summary by Source</title>
+      <table>
+        <search>
+          <query>index=zeek source="*conn.log" $src_ip_include$ $src_ip_exclude$
+| where NOT match(id.resp_h, "^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)")
+  AND orig_bytes > 0
+| stats count AS connections, dc(id.resp_h) AS unique_dsts, dc(id.resp_p) AS unique_ports,
+        sum(orig_bytes) AS total_sent, avg(duration) AS avg_duration_sec
+    by id.orig_h
+| eval total_mb=round(total_sent/1048576, 2)
+| eval avg_duration_sec=round(avg_duration_sec, 1)
+| sort - connections</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*conn.log"+id.orig_h%3D"$row.id.orig_h|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+
+</form>

@@ -1,0 +1,302 @@
+<form version="1.1" theme="light">
+  <label>11 - RDP Activity &amp; Lateral Movement</label>
+  <fieldset submitButton="true" autoRun="true">
+    <input type="time" token="time_range" searchWhenChanged="false">
+      <label>Time Range</label>
+      <default>
+        <earliest>-24h@h</earliest>
+        <latest>now</latest>
+      </default>
+    </input>
+    <input type="multiselect" token="src_ip_include" searchWhenChanged="false">
+      <label>Source IP - Include</label>
+      <choice value="*">All</choice>
+      <fieldForLabel>id.orig_h</fieldForLabel>
+      <fieldForValue>id.orig_h</fieldForValue>
+      <search>
+        <query>index=zeek source="*conn.log" id.resp_p=3389 | dedup id.orig_h | sort id.orig_h | table id.orig_h</query>
+        <earliest>$time_range.earliest$</earliest>
+        <latest>$time_range.latest$</latest>
+      </search>
+      <default>*</default>
+      <initialValue>*</initialValue>
+      <valuePrefix>id.orig_h="</valuePrefix>
+      <valueSuffix>"</valueSuffix>
+      <delimiter> OR </delimiter>
+      <prefix>(</prefix>
+      <suffix>)</suffix>
+    </input>
+    <input type="multiselect" token="src_ip_exclude" searchWhenChanged="false">
+      <label>Source IP - Exclude</label>
+      <choice value="__none__">None</choice>
+      <fieldForLabel>id.orig_h</fieldForLabel>
+      <fieldForValue>id.orig_h</fieldForValue>
+      <search>
+        <query>index=zeek source="*conn.log" id.resp_p=3389 | dedup id.orig_h | sort id.orig_h | table id.orig_h</query>
+        <earliest>$time_range.earliest$</earliest>
+        <latest>$time_range.latest$</latest>
+      </search>
+      <default>__none__</default>
+      <initialValue>__none__</initialValue>
+      <valuePrefix>id.orig_h!="</valuePrefix>
+      <valueSuffix>"</valueSuffix>
+      <delimiter> AND </delimiter>
+      <prefix>(</prefix>
+      <suffix>)</suffix>
+    </input>
+  </fieldset>
+
+  <!-- ── ROW 1: Activity overview ── -->
+  <row>
+    <panel>
+      <title>RDP Activity Over Time (port 3389)</title>
+      <chart>
+        <search>
+          <query>index=zeek source="*conn.log" $src_ip_include$ $src_ip_exclude$ id.resp_p=3389
+| timechart span=5m count AS "RDP Connections"</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">all</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>RDP Connection State Distribution</title>
+      <chart>
+        <search>
+          <query>index=zeek source="*conn.log" $src_ip_include$ $src_ip_exclude$ id.resp_p=3389
+| stats count by conn_state
+| sort - count</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="charting.chart">pie</option>
+        <option name="charting.drilldown">all</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+
+  <!-- ── ROW 2: External RDP inbound ── -->
+  <row>
+    <panel>
+      <!-- Inbound RDP from non-RFC1918 IPs is almost never legitimate in a
+           well-managed network. VPNs should terminate before RDP is reached. T1021.001 -->
+      <title>RDP from External IP (Non-RFC1918 Source) (T1021.001)</title>
+      <table>
+        <search>
+          <query>index=zeek source="*conn.log" $src_ip_include$ $src_ip_exclude$ id.resp_p=3389
+| where NOT match(id.orig_h, "^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)")
+| stats count AS connections, dc(id.resp_h) AS unique_targets, values(id.resp_h) AS targets,
+        values(conn_state) AS states, min(_time) AS first_seen, max(_time) AS last_seen
+    by id.orig_h
+| eval first_seen=strftime(first_seen, "%Y-%m-%dT%H:%M:%S")
+| eval last_seen=strftime(last_seen, "%Y-%m-%dT%H:%M:%S")
+| sort - connections</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*conn.log"+id.orig_h%3D"$row.id.orig_h|u$"+id.resp_p%3D3389</link>
+        </drilldown>
+      </table>
+    </panel>
+    <panel>
+      <!-- Internal → internal RDP is lateral movement when the source is a workstation
+           rather than a known jump server / bastion. T1021.001 -->
+      <title>RDP Lateral Movement (Internal → Internal) (T1021.001)</title>
+      <table>
+        <search>
+          <query>index=zeek source="*conn.log" $src_ip_include$ $src_ip_exclude$ id.resp_p=3389
+| where match(id.orig_h, "^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)")
+  AND match(id.resp_h, "^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)")
+| stats count AS connections, dc(id.resp_h) AS unique_targets, values(id.resp_h) AS targets,
+        values(conn_state) AS states
+    by id.orig_h
+| sort - connections</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*conn.log"+id.orig_h%3D"$row.id.orig_h|u$"+id.resp_p%3D3389</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+
+  <!-- ── ROW 3: Brute force ── -->
+  <row>
+    <panel>
+      <!-- Brute force signature: many short-duration connections from same src to same target.
+           Short duration + failed conn_state + high count = automated credential spray. T1110 -->
+      <title>RDP Brute Force Candidates - Many Short Connections (&gt;10) (T1110)</title>
+      <table>
+        <search>
+          <query>index=zeek source="*conn.log" $src_ip_include$ $src_ip_exclude$ id.resp_p=3389
+| where duration < 10 OR isnull(duration)
+| stats count AS attempts, dc(id.resp_h) AS unique_targets, values(conn_state) AS states
+    by id.orig_h
+| where attempts > 10
+| sort - attempts</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*conn.log"+id.orig_h%3D"$row.id.orig_h|u$"+id.resp_p%3D3389</link>
+        </drilldown>
+      </table>
+    </panel>
+    <panel>
+      <!-- Sources hitting many distinct RDP targets — lateral movement spray or
+           worm propagation attempting RDP on everything in the subnet. -->
+      <title>RDP Spray - One Source to Many Targets (&gt;3 targets)</title>
+      <table>
+        <search>
+          <query>index=zeek source="*conn.log" $src_ip_include$ $src_ip_exclude$ id.resp_p=3389
+| stats dc(id.resp_h) AS unique_targets, count AS connections, values(id.resp_h) AS targets,
+        values(conn_state) AS states
+    by id.orig_h
+| where unique_targets > 3
+| sort - unique_targets</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*conn.log"+id.orig_h%3D"$row.id.orig_h|u$"+id.resp_p%3D3389</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+
+  <!-- ── ROW 4: Session duration analysis ── -->
+  <row>
+    <panel>
+      <!-- Very short RDP sessions (< 30s) = failed auth or automated probe.
+           Very long sessions (> 2hr) = interactive attacker activity. Both ends are worth examining. -->
+      <title>RDP Session Duration Outliers (All Sessions)</title>
+      <table>
+        <search>
+          <query>index=zeek source="*conn.log" $src_ip_include$ $src_ip_exclude$ id.resp_p=3389
+| where isnotnull(duration)
+| eval duration_sec=round(duration, 1)
+| eval session_type=case(
+    duration < 5,    "very short (&lt;5s) — probe/fail",
+    duration < 30,   "short (&lt;30s) — likely failed auth",
+    duration > 7200, "long (&gt;2hr) — interactive session",
+    true(),          "normal")
+| stats count AS sessions, avg(duration_sec) AS avg_sec by id.orig_h, id.resp_h, session_type
+| eval avg_sec=round(avg_sec, 1)
+| sort session_type, - sessions</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*conn.log"+id.orig_h%3D"$row.id.orig_h|u$"+id.resp_h%3D"$row.id.resp_h|u$"+id.resp_p%3D3389</link>
+        </drilldown>
+      </table>
+    </panel>
+    <panel>
+      <!-- RDP on ports other than 3389 indicates either intentional port changes
+           to avoid detection or non-standard RDP gateway configuration. T1021.001 -->
+      <title>RDP Service on Non-Standard Ports (service=rdp, port != 3389)</title>
+      <table>
+        <search>
+          <query>index=zeek source="*conn.log" $src_ip_include$ $src_ip_exclude$
+| search service=rdp AND id.resp_p!=3389
+| stats count AS connections, dc(id.orig_h) AS unique_clients, dc(id.resp_h) AS unique_servers by id.resp_p
+| sort - connections</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*conn.log"+service%3Drdp+id.resp_p%3D"$row.id.resp_p|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+
+  <!-- ── ROW 5: Top sources, targets & summary ── -->
+  <row>
+    <panel>
+      <title>Top RDP Sources</title>
+      <chart>
+        <search>
+          <query>index=zeek source="*conn.log" $src_ip_include$ $src_ip_exclude$ id.resp_p=3389
+| top limit=15 id.orig_h</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="charting.chart">bar</option>
+        <option name="charting.drilldown">all</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Top RDP Targets</title>
+      <chart>
+        <search>
+          <query>index=zeek source="*conn.log" $src_ip_include$ $src_ip_exclude$ id.resp_p=3389
+| top limit=15 id.resp_h</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="charting.chart">bar</option>
+        <option name="charting.drilldown">all</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+
+  <row>
+    <panel>
+      <title>RDP Source-to-Target Summary</title>
+      <table>
+        <search>
+          <query>index=zeek source="*conn.log" $src_ip_include$ $src_ip_exclude$ id.resp_p=3389
+| stats count AS connections, avg(duration) AS avg_duration_sec, max(duration) AS max_duration_sec,
+        dc(uid) AS sessions, values(conn_state) AS states
+    by id.orig_h, id.resp_h
+| eval avg_duration_sec=round(avg_duration_sec, 1)
+| eval max_duration_sec=round(max_duration_sec, 1)
+| sort - connections</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*conn.log"+id.orig_h%3D"$row.id.orig_h|u$"+id.resp_h%3D"$row.id.resp_h|u$"+id.resp_p%3D3389</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+
+</form>

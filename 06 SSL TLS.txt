@@ -1,0 +1,352 @@
+<form version="1.1" theme="light">
+  <label>06 - SSL/TLS &amp; Certificate Analysis</label>
+  <fieldset submitButton="true" autoRun="true">
+    <input type="time" token="time_range" searchWhenChanged="false">
+      <label>Time Range</label>
+      <default>
+        <earliest>-24h@h</earliest>
+        <latest>now</latest>
+      </default>
+    </input>
+    <input type="multiselect" token="src_ip_include" searchWhenChanged="false">
+      <label>Source IP - Include</label>
+      <choice value="*">All</choice>
+      <fieldForLabel>id.orig_h</fieldForLabel>
+      <fieldForValue>id.orig_h</fieldForValue>
+      <search>
+        <query>index=zeek source="*ssl.log" | dedup id.orig_h | sort id.orig_h | table id.orig_h</query>
+        <earliest>$time_range.earliest$</earliest>
+        <latest>$time_range.latest$</latest>
+      </search>
+      <default>*</default>
+      <initialValue>*</initialValue>
+      <valuePrefix>id.orig_h="</valuePrefix>
+      <valueSuffix>"</valueSuffix>
+      <delimiter> OR </delimiter>
+      <prefix>(</prefix>
+      <suffix>)</suffix>
+    </input>
+    <input type="multiselect" token="src_ip_exclude" searchWhenChanged="false">
+      <label>Source IP - Exclude</label>
+      <choice value="__none__">None</choice>
+      <fieldForLabel>id.orig_h</fieldForLabel>
+      <fieldForValue>id.orig_h</fieldForValue>
+      <search>
+        <query>index=zeek source="*ssl.log" | dedup id.orig_h | sort id.orig_h | table id.orig_h</query>
+        <earliest>$time_range.earliest$</earliest>
+        <latest>$time_range.latest$</latest>
+      </search>
+      <default>__none__</default>
+      <initialValue>__none__</initialValue>
+      <valuePrefix>id.orig_h!="</valuePrefix>
+      <valueSuffix>"</valueSuffix>
+      <delimiter> AND </delimiter>
+      <prefix>(</prefix>
+      <suffix>)</suffix>
+    </input>
+  </fieldset>
+
+  <!-- ── ROW 1: Activity overview ── -->
+  <row>
+    <panel>
+      <title>TLS Sessions Over Time</title>
+      <chart>
+        <search>
+          <query>index=zeek source="*ssl.log" $src_ip_include$ $src_ip_exclude$
+| timechart span=5m count AS "TLS Sessions"</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">all</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>TLS Version Distribution</title>
+      <chart>
+        <search>
+          <query>index=zeek source="*ssl.log" $src_ip_include$ $src_ip_exclude$
+| where version!="" AND version!="-"
+| top limit=10 version</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="charting.chart">pie</option>
+        <option name="charting.drilldown">all</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+
+  <!-- ── ROW 2: Deprecated versions & weak ciphers ── -->
+  <row>
+    <panel>
+      <!-- SSLv2/v3 and TLS 1.0/1.1 are deprecated and cryptographically broken.
+           Any usage in a modern network warrants investigation. T1573 -->
+      <title>Deprecated TLS Versions (SSLv2/SSLv3/TLSv10/TLSv11)</title>
+      <table>
+        <search>
+          <query>index=zeek source="*ssl.log" $src_ip_include$ $src_ip_exclude$
+| search version=SSLv2 OR version=SSLv3 OR version=TLSv10 OR version=TLSv11
+| stats count AS sessions, dc(id.resp_h) AS unique_servers, values(server_name) AS snis by id.orig_h, version
+| sort - sessions</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*ssl.log"+id.orig_h%3D"$row.id.orig_h|u$"+version%3D"$row.version|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+    <panel>
+      <title>Cipher Suite Inventory</title>
+      <chart>
+        <search>
+          <query>index=zeek source="*ssl.log" $src_ip_include$ $src_ip_exclude$
+| where cipher!="" AND cipher!="-"
+| top limit=15 cipher</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="charting.chart">bar</option>
+        <option name="charting.drilldown">all</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+
+  <!-- ── ROW 3: Certificate issues ── -->
+  <row>
+    <panel>
+      <!-- Self-signed: issuer == subject. Legitimate CAs never appear as their own issuer
+           in a leaf cert. Common in C2 frameworks, malware, and attacker infra. -->
+      <title>Self-Signed Certificates (Issuer = Subject)</title>
+      <table>
+        <search>
+          <query>index=zeek source="*ssl.log" $src_ip_include$ $src_ip_exclude$
+| where subject=issuer AND subject!="" AND subject!="-"
+| stats count AS sessions, dc(id.orig_h) AS unique_clients by id.resp_h, id.resp_p, subject, server_name
+| sort - sessions</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*ssl.log"+id.resp_h%3D"$row.id.resp_h|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+    <panel>
+      <title>Certificate Validation Failures</title>
+      <table>
+        <search>
+          <query>index=zeek source="*ssl.log" $src_ip_include$ $src_ip_exclude$
+| where validation_status!="" AND validation_status!="ok" AND validation_status!="-"
+| stats count AS sessions, dc(id.orig_h) AS unique_clients by id.resp_h, id.resp_p, server_name, subject, validation_status
+| sort - sessions</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*ssl.log"+id.resp_h%3D"$row.id.resp_h|u$"+validation_status%3D"$row.validation_status|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+
+  <!-- ── ROW 4: JA3/JA3S fingerprinting ── -->
+  <row>
+    <panel>
+      <!-- JA3 hashes the TLS ClientHello parameters (version, cipher list, extensions,
+           elliptic curves). Known C2 frameworks have documented JA3 signatures.
+           Requires Zeek ja3 package. -->
+      <title>JA3 Client Fingerprints - Top (C2 Client Detection)</title>
+      <table>
+        <search>
+          <query>index=zeek source="*ssl.log" $src_ip_include$ $src_ip_exclude$
+| where ja3!="" AND ja3!="-"
+| stats count AS sessions, dc(id.orig_h) AS unique_clients, dc(id.resp_h) AS unique_servers, values(server_name) AS snis by ja3
+| sort - sessions</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*ssl.log"+ja3%3D"$row.ja3|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+    <panel>
+      <!-- JA3S fingerprints the ServerHello. Combining JA3+JA3S can attribute traffic
+           to a specific C2 framework and server implementation. -->
+      <title>JA3S Server Fingerprints - Top</title>
+      <table>
+        <search>
+          <query>index=zeek source="*ssl.log" $src_ip_include$ $src_ip_exclude$
+| where ja3s!="" AND ja3s!="-"
+| stats count AS sessions, dc(id.orig_h) AS unique_clients, dc(id.resp_h) AS unique_servers by ja3s
+| sort - sessions</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*ssl.log"+ja3s%3D"$row.ja3s|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+
+  <!-- ── ROW 5: Rare JA3 & fingerprint rotation ── -->
+  <row>
+    <panel>
+      <title>Rare JA3 Fingerprints (&lt;5 sessions) - Unusual TLS Client</title>
+      <table>
+        <search>
+          <query>index=zeek source="*ssl.log" $src_ip_include$ $src_ip_exclude$
+| where ja3!="" AND ja3!="-"
+| stats count AS sessions, dc(id.orig_h) AS unique_clients, values(id.orig_h) AS clients, values(server_name) AS snis by ja3
+| where sessions < 5
+| sort sessions</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*ssl.log"+ja3%3D"$row.ja3|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+    <panel>
+      <!-- Hosts cycling through many distinct JA3 fingerprints may be rotating
+           TLS client profiles to evade fingerprint-based detection. -->
+      <title>Hosts with Many Distinct JA3 Fingerprints (&gt;3) - Rotation Indicator</title>
+      <table>
+        <search>
+          <query>index=zeek source="*ssl.log" $src_ip_include$ $src_ip_exclude$
+| where ja3!="" AND ja3!="-"
+| stats dc(ja3) AS unique_ja3, count AS sessions by id.orig_h
+| where unique_ja3 > 3
+| sort - unique_ja3</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*ssl.log"+id.orig_h%3D"$row.id.orig_h|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+
+  <!-- ── ROW 6: Non-standard ports & missing SNI ── -->
+  <row>
+    <panel>
+      <!-- C2 frameworks commonly run HTTPS listeners on non-443 ports to blend
+           into encrypted traffic while avoiding port-specific monitoring. -->
+      <title>TLS on Non-Standard Ports (not 443)</title>
+      <table>
+        <search>
+          <query>index=zeek source="*ssl.log" $src_ip_include$ $src_ip_exclude$
+| where id.resp_p!=443
+| stats count AS sessions, dc(id.orig_h) AS unique_clients, dc(id.resp_h) AS unique_servers, values(server_name) AS snis, values(version) AS versions by id.resp_p
+| sort - sessions</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*ssl.log"+id.resp_p%3D"$row.id.resp_p|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+    <panel>
+      <!-- Modern browsers and legit apps always send SNI in TLS 1.2+.
+           Established TLS with no SNI is a reliable C2/malware indicator. -->
+      <title>TLS Sessions Without SNI - Direct-IP C2 Indicator</title>
+      <table>
+        <search>
+          <query>index=zeek source="*ssl.log" $src_ip_include$ $src_ip_exclude$
+| where (server_name="" OR server_name="-" OR isnull(server_name)) AND established=true
+| stats count AS sessions, dc(id.resp_h) AS unique_servers, values(id.resp_h) AS servers, values(version) AS versions by id.orig_h
+| sort - sessions</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*ssl.log"+id.orig_h%3D"$row.id.orig_h|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+
+  <!-- ── ROW 7: Top SNIs & summary ── -->
+  <row>
+    <panel>
+      <title>Top Server Names (SNI) by Session Count</title>
+      <chart>
+        <search>
+          <query>index=zeek source="*ssl.log" $src_ip_include$ $src_ip_exclude$
+| where server_name!="" AND server_name!="-"
+| top limit=15 server_name</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="charting.chart">bar</option>
+        <option name="charting.drilldown">all</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>SSL/TLS Source-to-Server Summary</title>
+      <table>
+        <search>
+          <query>index=zeek source="*ssl.log" $src_ip_include$ $src_ip_exclude$
+| stats count AS sessions, dc(server_name) AS unique_snis, values(version) AS versions, values(cipher) AS ciphers by id.orig_h, id.resp_h, id.resp_p
+| sort - sessions</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*ssl.log"+id.orig_h%3D"$row.id.orig_h|u$"+id.resp_h%3D"$row.id.resp_h|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+
+</form>
