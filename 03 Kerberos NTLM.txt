@@ -1,0 +1,413 @@
+<form version="1.1" theme="light">
+  <label>03 - Kerberos &amp; NTLM Authentication</label>
+  <fieldset submitButton="true" autoRun="true">
+    <input type="time" token="time_range" searchWhenChanged="false">
+      <label>Time Range</label>
+      <default>
+        <earliest>-24h@h</earliest>
+        <latest>now</latest>
+      </default>
+    </input>
+    <input type="multiselect" token="src_ip_include" searchWhenChanged="false">
+      <label>Source IP - Include</label>
+      <choice value="*">All</choice>
+      <fieldForLabel>id.orig_h</fieldForLabel>
+      <fieldForValue>id.orig_h</fieldForValue>
+      <search>
+        <query>index=zeek source="*kerberos.log" OR source="*ntlm.log" | table id.orig_h | dedup id.orig_h | sort id.orig_h</query>
+        <earliest>$time_range.earliest$</earliest>
+        <latest>$time_range.latest$</latest>
+      </search>
+      <default>*</default>
+      <initialValue>*</initialValue>
+      <valuePrefix>id.orig_h="</valuePrefix>
+      <valueSuffix>"</valueSuffix>
+      <delimiter> OR </delimiter>
+      <prefix>(</prefix>
+      <suffix>)</suffix>
+    </input>
+    <input type="multiselect" token="src_ip_exclude" searchWhenChanged="false">
+      <label>Source IP - Exclude</label>
+      <choice value="__none__">None</choice>
+      <fieldForLabel>id.orig_h</fieldForLabel>
+      <fieldForValue>id.orig_h</fieldForValue>
+      <search>
+        <query>index=zeek source="*kerberos.log" OR source="*ntlm.log" | table id.orig_h | dedup id.orig_h | sort id.orig_h</query>
+        <earliest>$time_range.earliest$</earliest>
+        <latest>$time_range.latest$</latest>
+      </search>
+      <default>__none__</default>
+      <initialValue>__none__</initialValue>
+      <valuePrefix>id.orig_h!="</valuePrefix>
+      <valueSuffix>"</valueSuffix>
+      <delimiter> AND </delimiter>
+      <prefix>(</prefix>
+      <suffix>)</suffix>
+    </input>
+  </fieldset>
+
+  <!-- ── ROW 1: Activity overview ── -->
+  <row>
+    <panel>
+      <title>Kerberos Activity Over Time (AS vs TGS)</title>
+      <chart>
+        <search>
+          <query>index=zeek source="*kerberos.log" $src_ip_include$ $src_ip_exclude$
+| timechart span=5m count by request_type</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">all</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>NTLM Activity Over Time (Success vs Failure)</title>
+      <chart>
+        <search>
+          <query>index=zeek source="*ntlm.log" $src_ip_include$ $src_ip_exclude$
+| eval result=if(success="true" OR success=true, "success", "failure")
+| timechart span=5m count by result</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">all</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+
+  <!-- ── ROW 2: Kerberoasting & AS-REP Roasting ── -->
+  <row>
+    <panel>
+      <!-- T1558.003 — Kerberoasting
+           Attackers request TGS tickets for service accounts using RC4-HMAC (etype 23)
+           to crack offline. AES-only environments should have zero RC4 TGS tickets. -->
+      <title>Kerberoasting Candidates - TGS with RC4-HMAC Cipher (T1558.003)</title>
+      <table>
+        <search>
+          <query>index=zeek source="*kerberos.log" $src_ip_include$ $src_ip_exclude$
+| search request_type=TGS cipher=rc4-hmac
+| where match(service, "\/")
+| stats count, values(uid) AS uids by id.orig_h, id.resp_h, client, service, cipher
+| sort - count</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*kerberos.log"+id.orig_h%3D"$row.id.orig_h|u$"+request_type%3DTGS+cipher%3Drc4-hmac</link>
+        </drilldown>
+      </table>
+    </panel>
+    <panel>
+      <!-- T1558.004 — AS-REP Roasting
+           Accounts with "Do not require Kerberos preauthentication" return crackable
+           AS-REP blobs. Network signature: rapid AS-REQ for many distinct principals
+           from one source, often with short inter-request gaps. -->
+      <title>AS-REP Roasting Candidates - Rapid AS-REQ Enumeration (T1558.004)</title>
+      <table>
+        <search>
+          <query>index=zeek source="*kerberos.log" $src_ip_include$ $src_ip_exclude$
+| search request_type=AS
+| stats count AS as_requests, dc(client) AS unique_clients, values(client) AS clients, dc(service) AS unique_services by id.orig_h, id.resp_h
+| where unique_clients > 3
+| sort - as_requests</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*kerberos.log"+id.orig_h%3D"$row.id.orig_h|u$"+request_type%3DAS</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+
+  <!-- ── ROW 3: Kerberos failures & brute force ── -->
+  <row>
+    <panel>
+      <title>Kerberos Failures by Error Type</title>
+      <chart>
+        <search>
+          <query>index=zeek source="*kerberos.log" $src_ip_include$ $src_ip_exclude$
+| search success=false OR success="false"
+| where error_msg!="" AND error_msg!="UNKNOWN"
+| top limit=15 error_msg</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="charting.chart">bar</option>
+        <option name="charting.drilldown">all</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <!-- KDC_ERR_PREAUTH_FAILED = wrong password; KDC_ERR_C_PRINCIPAL_UNKNOWN = bad username.
+           High counts of either from one source = password spray or brute force. -->
+      <title>Kerberos Brute Force / Password Spray (&gt;10 failures per source)</title>
+      <table>
+        <search>
+          <query>index=zeek source="*kerberos.log" $src_ip_include$ $src_ip_exclude$
+| search success=false OR success="false"
+| search error_msg="KDC_ERR_PREAUTH_FAILED" OR error_msg="KDC_ERR_C_PRINCIPAL_UNKNOWN" OR error_msg="KRB_AP_ERR_BAD_INTEGRITY"
+| stats count AS failures, dc(client) AS unique_accounts, values(error_msg) AS errors by id.orig_h, id.resp_h
+| where failures > 10
+| sort - failures</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*kerberos.log"+id.orig_h%3D"$row.id.orig_h|u$"+success%3Dfalse</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+
+  <!-- ── ROW 4: Encryption inventory & downgrade ── -->
+  <row>
+    <panel>
+      <!-- RC4-HMAC (etype 23) is crackable; DES even more so.
+           AES256 is the expected baseline in modern AD environments. -->
+      <title>Cipher / Encryption Type Inventory (Downgrade Detection)</title>
+      <chart>
+        <search>
+          <query>index=zeek source="*kerberos.log" $src_ip_include$ $src_ip_exclude$
+| where cipher!="" AND cipher!="-"
+| top limit=10 cipher</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="charting.chart">pie</option>
+        <option name="charting.drilldown">all</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Hosts Using Weak Ciphers (RC4 / DES)</title>
+      <table>
+        <search>
+          <query>index=zeek source="*kerberos.log" $src_ip_include$ $src_ip_exclude$
+| search cipher=rc4-hmac OR cipher=des-cbc-md5 OR cipher=des-cbc-crc
+| stats count AS requests, dc(service) AS unique_services, values(request_type) AS req_types by id.orig_h, id.resp_h, cipher
+| sort - requests</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*kerberos.log"+id.orig_h%3D"$row.id.orig_h|u$"+cipher%3D"$row.cipher|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+
+  <!-- ── ROW 5: Golden / Silver ticket indicators ── -->
+  <row>
+    <panel>
+      <!-- T1558.001/002 — Golden/Silver Ticket
+           Forged tickets may have anomalous lifetimes (till far in future or epoch 0).
+           A TGS request arriving with no prior TGT in the window for the same client
+           is also suspicious (attacker injected a golden ticket locally). -->
+      <title>Anomalous Ticket Lifetimes - Golden/Silver Ticket Indicator (T1558.001/002)</title>
+      <table>
+        <search>
+          <query>index=zeek source="*kerberos.log" $src_ip_include$ $src_ip_exclude$
+| where isnotnull(till) AND till!=""
+| eval till_epoch=strptime(till, "%Y-%m-%dT%H:%M:%S")
+| eval till_days=round((till_epoch - now()) / 86400, 1)
+| where till_days > 30 OR till_days < 0
+| stats count by id.orig_h, id.resp_h, client, service, request_type, cipher, till, till_days, uid
+| sort - till_days</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*kerberos.log"+uid%3D"$row.uid|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+    <panel>
+      <!-- Sources making TGS requests with no corresponding AS-REQ in the window.
+           Normal flow: AS-REQ → AS-REP → TGS-REQ → TGS-REP.
+           TGS with no AS-REQ suggests a pre-existing (possibly forged) ticket. -->
+      <title>TGS Without Prior AS-REQ (Same Source, Same Window)</title>
+      <table>
+        <search>
+          <query>index=zeek source="*kerberos.log" $src_ip_include$ $src_ip_exclude$
+| stats dc(request_type) AS type_count, values(request_type) AS types, count by id.orig_h, id.resp_h, client
+| where type_count=1 AND types="TGS"
+| sort - count</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*kerberos.log"+id.orig_h%3D"$row.id.orig_h|u$"+request_type%3DTGS</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+
+  <!-- ── ROW 6: NTLM full table & failures ── -->
+  <row>
+    <panel>
+      <title>NTLM Authentication - All Events (ntlm.log)</title>
+      <table>
+        <search>
+          <query>index=zeek source="*ntlm.log" $src_ip_include$ $src_ip_exclude$
+| stats count by id.orig_h, id.resp_h, username, hostname, domainname, success, status, uid
+| sort - count</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*ntlm.log"+uid%3D"$row.uid|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+    <panel>
+      <title>NTLM Failures - Brute Force Candidates (&gt;5 per source)</title>
+      <table>
+        <search>
+          <query>index=zeek source="*ntlm.log" $src_ip_include$ $src_ip_exclude$
+| search success=false OR success="false"
+| stats count AS failures, dc(username) AS unique_users, dc(id.resp_h) AS unique_targets, values(username) AS usernames by id.orig_h
+| where failures > 5
+| sort - failures</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*ntlm.log"+id.orig_h%3D"$row.id.orig_h|u$"+success%3Dfalse</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+
+  <!-- ── ROW 7: NTLM relay & Pass-the-Hash ── -->
+  <row>
+    <panel>
+      <!-- T1550.002 — Pass-the-Hash / NTLM Relay
+           A relay attack has one source authenticating to many distinct targets in a
+           short window using the same username. Normal machines authenticate to a
+           handful of DCs; > N unique targets from one host is suspicious. -->
+      <title>NTLM Relay Candidates - One Source to Many Targets (T1550.002)</title>
+      <table>
+        <search>
+          <query>index=zeek source="*ntlm.log" $src_ip_include$ $src_ip_exclude$
+| stats dc(id.resp_h) AS unique_targets, dc(username) AS unique_users, count AS events, values(username) AS usernames, values(id.resp_h) AS targets by id.orig_h
+| where unique_targets > 5
+| sort - unique_targets</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*ntlm.log"+id.orig_h%3D"$row.id.orig_h|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+    <panel>
+      <!-- Hosts appearing in ntlm.log but NOT in kerberos.log for the same window.
+           In a Kerberos-enabled AD environment, workstations should use Kerberos.
+           Pure NTLM from a host suggests: non-domain-joined attacker, PTH, or
+           deliberate downgrade forcing NTLM negotiation. -->
+      <title>Hosts Using NTLM Only (No Kerberos) - Potential PTH/Downgrade</title>
+      <table>
+        <search>
+          <query>index=zeek (source="*ntlm.log" OR source="*kerberos.log") $src_ip_include$ $src_ip_exclude$
+| eval proto=if(match(source, "ntlm"), "ntlm", "kerberos")
+| stats dc(proto) AS proto_count, values(proto) AS protocols, count by id.orig_h
+| where proto_count=1 AND protocols="ntlm"
+| sort - count</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*ntlm.log"+id.orig_h%3D"$row.id.orig_h|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+
+  <!-- ── ROW 8: Source-to-DC summaries ── -->
+  <row>
+    <panel>
+      <title>Kerberos Source-to-DC Summary</title>
+      <table>
+        <search>
+          <query>index=zeek source="*kerberos.log" $src_ip_include$ $src_ip_exclude$
+| stats count AS total_requests, dc(client) AS unique_clients, dc(service) AS unique_services, dc(uid) AS sessions, values(cipher) AS ciphers by id.orig_h, id.resp_h
+| sort - total_requests</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*kerberos.log"+id.orig_h%3D"$row.id.orig_h|u$"+id.resp_h%3D"$row.id.resp_h|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+    <panel>
+      <title>NTLM Source-to-Target Summary</title>
+      <table>
+        <search>
+          <query>index=zeek source="*ntlm.log" $src_ip_include$ $src_ip_exclude$
+| stats count AS total_events, dc(username) AS unique_users, dc(uid) AS sessions, values(domainname) AS domains by id.orig_h, id.resp_h
+| sort - total_events</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+        <drilldown target="_blank">
+          <link>search?q=index%3Dzeek+source%3D"*ntlm.log"+id.orig_h%3D"$row.id.orig_h|u$"+id.resp_h%3D"$row.id.resp_h|u$"</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+
+</form>
